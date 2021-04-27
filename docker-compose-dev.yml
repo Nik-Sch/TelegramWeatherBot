@@ -1,13 +1,17 @@
-version: '2.0'
+version: '3.9'
 services:
   app:
-    build: .
+    build:
+      context: ./
+      dockerfile: Dockerfile-dev
     container_name: weatherbot
     restart: always
     depends_on:
-      - redis
+    - redis
     env_file:
       env.env
+    volumes:
+      - ./:/usr/src/app
 
   redis:
     image: redis
