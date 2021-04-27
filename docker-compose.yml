@@ -1,0 +1,16 @@
+version: '2.0'
+services:
+  app:
+    build: .
+    container_name: weatherbot
+    restart: always
+    depends_on:
+    - mongo
+    environment:
+      - NODE_ENV=production
+
+  mongo:
+    image: mongo:4.4.5-bionic
+    restart: always
+    volumes:
+      - ./data:/data/db
