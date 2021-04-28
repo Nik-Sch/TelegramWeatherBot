@@ -24,7 +24,7 @@ from enum import Enum
 
 from telegram.message import Message
 
-from db import Backend, Location, State, StateType
+from db import Backend, Location
 from weatherProvider import fetchAndPlot, getLocationInfo
 
 db = Backend()
@@ -122,7 +122,7 @@ def locationReplyKeyboard(locations: List[Location]) -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=True)
 
 
-def get(update: Update, context: CallbackContext):
+def getWrapper(update: Update, context: CallbackContext, detailed: bool):
     chat_id, message = getStuff(update)
     logging.log(level=logging.INFO, msg=f"Cid: {type(chat_id)}")
     locations = list(db.getLocations(chat_id))
@@ -133,7 +133,7 @@ def get(update: Update, context: CallbackContext):
 
     locationNames = list(map(lambda x: x['name'], locations))
     if context.args != None and len(context.args) == 0:
-        db.setState(chat_id, {'type': StateType.GET_LOCATION})
+        db.setState(chat_id, {'type': 'getDetailed' if detailed else 'get'})
         message.reply_text(
             'Choose a station.', reply_markup=locationReplyKeyboard(locations))
         return
@@ -147,20 +147,27 @@ def get(update: Update, context: CallbackContext):
                  location['lat'], location['lon'], name=location['name'])
 
 
+def get(update: Update, context: CallbackContext):
+    getWrapper(update, context, False)
+
+def getDetailed(update: Update, context: CallbackContext):
+    getWrapper(update, context, False)
+
+
 def handleLocation(update: Update, context: CallbackContext):
     chat_id, message = getStuff(update)
     lat = message.location.latitude
     lon = message.location.longitude
-    if db.getState(chat_id)['type'] == StateType.ADD_LOCATION:  # type: ignore
+    if db.getState(chat_id)['type'] == 'add':  # type: ignore
         addLocation(chat_id, context.bot, lat, lon)
-        db.setState(chat_id, {'type': StateType.IDLE})
+        db.setState(chat_id, {'type': 'idle'})
     else:
         sendForecast(chat_id, context.bot, lat, lon)
 
 
 def add(update: Update, context: CallbackContext):
     chat_id, message = getStuff(update)
-    db.setState(chat_id, {'type': StateType.ADD_LOCATION})
+    db.setState(chat_id, {'type': 'add'})
     context.bot.send_message(chat_id, text="Ok, now send a location.")
 
 
@@ -169,19 +176,19 @@ def handleText(update: Update, context: CallbackContext):
     state = db.getState(chat_id)
 
     logging.log(msg=f"text in state {state}", level=logging.INFO)
-    if state['type'] == StateType.GET_LOCATION:  # type: ignore
-        db.setState(chat_id, {'type': StateType.IDLE})
+    if state['type'] == 'get' or state['type'] == 'getDetailed':  # type: ignore
+        db.setState(chat_id, {'type': 'idle'})
         locations = db.getLocations(chat_id)
         location = next(
             filter(lambda x: x['name'] == message.text, locations), None)
         if location != None:
             sendForecast(chat_id, context.bot,
-                         location['lat'], location['lon'], name=location['name'])
+                         location['lat'], location['lon'], name=location['name'], duration=10 if state['type'] == 'get' else 1.5)  # type: ignore
         else:
             context.bot.send_message(
                 chat_id, text="Invalid station name.", reply_markup=ReplyKeyboardRemove())
 
-    elif state['type'] == StateType.RENAME_LOCATION:  # type: ignore
+    elif state['type'] == 'rename':  # type: ignore
         locations = db.getLocations(chat_id)
 
         # new name
@@ -202,7 +209,7 @@ def handleText(update: Update, context: CallbackContext):
             filter(lambda x: x['name'] == message.text, locations), None)
         if location != None:
             db.setState(
-                chat_id, {'type': StateType.RENAME_LOCATION, 'location': location})
+                chat_id, {'type': 'rename', 'location': location})
             context.bot.send_message(
                 chat_id, text="Ok. What is the new name?", reply_markup=ReplyKeyboardRemove())
         else:
@@ -212,7 +219,7 @@ def handleText(update: Update, context: CallbackContext):
 
 def rename(update: Update, context: CallbackContext):
     chat_id, message = getStuff(update)
-    db.setState(chat_id, {'type': StateType.RENAME_LOCATION})
+    db.setState(chat_id, {'type': 'rename'})
 
     locations = list(db.getLocations(chat_id))
     if len(locations) == 0:
@@ -233,6 +240,7 @@ dispatcher.add_handler(CommandHandler('start', start))
 dispatcher.add_handler(CommandHandler('add', add))
 dispatcher.add_handler(CommandHandler('getAll', getAll))
 dispatcher.add_handler(CommandHandler('get', get))
+dispatcher.add_handler(CommandHandler('getDetailed', getDetailed))
 dispatcher.add_handler(CommandHandler('rename', rename))
 dispatcher.add_handler(MessageHandler(Filters.location, handleLocation))
 dispatcher.add_handler(MessageHandler(Filters.text, handleText))

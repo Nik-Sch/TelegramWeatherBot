@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import Iterator, TypedDict
+from typing import Iterator, Literal, TypedDict
 from pymongo import MongoClient
 from pymongo.database import Database
 
@@ -9,16 +9,8 @@ class Location(TypedDict):
     lon: float
     name: str
 
-
-class StateType(str, Enum):
-    IDLE = 'idle'
-    GET_LOCATION = 'get'
-    ADD_LOCATION = 'add'
-    RENAME_LOCATION = 'rename'
-
-
 class State(TypedDict, total=False):
-    type: StateType
+    type: Literal['idle', 'get', 'getDetailed', 'add', 'rename']
     location: Location # NotRequired[Location] doesn't work...
 
 
@@ -61,5 +53,5 @@ class Backend():
     def getState(self, chat_id: str) -> State:
         result = self.db.states.find_one({'chat': chat_id})
         if result == None:
-            return {'type': StateType.IDLE}
+            return {'type': 'idle'}
         return result['state']
