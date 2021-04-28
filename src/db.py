@@ -28,7 +28,7 @@ class Backend():
     def __init__(self) -> None:
         self.db = MongoClient('mongo', 27017).weatherDB
         self.db.locations.create_index(
-            [('location.lat', 1), ('location.lon', 1)], unique=True)
+            [('chat', 1), ('location.lat', 1), ('location.lon', 1)], unique=True)
 
     def addLocation(self, chat_id: str, location: Location) -> bool:
         if self.db.locations.count({
