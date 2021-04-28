@@ -49,9 +49,7 @@ class ButtonQuery(TypedDict):
 
 
 def start(update: Update, context: CallbackContext):
-    context.bot.send_message(
-        chat_id=update.effective_chat.id, text="Send me locations and I will answer with the weather.")
-
+    context.bot.send_message(chat_id=update.effective_chat.id, text="Send me locations and I will answer with the weather.")
 
 def sendForecast(chat_id: Union[int, str], bot: Bot, lat: float, lon: float, detailed: bool, name: str = None):
     waitingMessage = bot.send_message(chat_id, text="⏳")
@@ -170,7 +168,7 @@ def handleLocation(update: Update, context: CallbackContext):
         addLocation(chat_id, context.bot, lat, lon)
         db.setState(chat_id, {'type': 'idle'})
     else:
-        sendForecast(chat_id, context.bot, lat, lon, False)
+        sendForecast(chat_id, context.bot, lat, lon, True)
 
 
 def add(update: Update, context: CallbackContext):
@@ -244,7 +242,7 @@ def handleInlineQuery(update: Update, context: CallbackContext):
 
     answers: List[InlineQueryResult] = []
     for locationResult in locationResults[:1]:
-        imageResult = fetchAndPlot(locationResult['lat'], locationResult['lon'], 10, jpeg=True)
+        imageResult = fetchAndPlot(locationResult['lat'], locationResult['lon'], 60*60, jpeg=True)
 
         url = "https://api.imgur.com/3/image"
         payload = {'image': base64.b64encode(open(imageResult['plot'], 'rb').read())}
@@ -269,6 +267,7 @@ def handleInlineQuery(update: Update, context: CallbackContext):
             )
         )
     context.bot.answer_inline_query(update.inline_query.id, results=answers, cache_time=10)
+
 
 updater = Updater(token=os.environ.get('BOT_TOKEN'))
 dispatcher = updater.dispatcher
