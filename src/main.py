@@ -9,22 +9,12 @@ from telegram import (Bot,
                       ReplyKeyboardMarkup,
                       KeyboardButton,
                       Update,
-                      ReplyKeyboardRemove
+                      ReplyKeyboardRemove, chat
                       )
-import redis
 import os
 import logging
-import urllib.request
 import json
-from datetime import datetime, timedelta
-from matplotlib import pyplot as plt
-from matplotlib.axes import Axes
-from matplotlib.dates import (date2num,
-                              DateFormatter,
-                              DayLocator,
-                              )
-import tempfile
-from typing import (Union,
+from typing import (Optional, Union,
                     List,
                     Tuple,
                     TypedDict,
@@ -33,21 +23,11 @@ from typing import (Union,
 from enum import Enum
 
 from telegram.message import Message
-# import numpy as np
 
+from db import Backend, Location, State, StateType
+from weatherProvider import fetchAndPlot, getLocationInfo
 
-class Location(TypedDict):
-    lat: float
-    lon: float
-    name: str
-
-
-class WeatherResult(TypedDict):
-    plot: str
-    current_temp: float
-    current_str: str
-    weather_station: str
-    weather_station_distance: float
+db = Backend()
 
 
 class ButtonQueryType(str, Enum):
@@ -58,70 +38,7 @@ class ButtonQueryType(str, Enum):
 class ButtonQuery(TypedDict):
     type: ButtonQueryType
     name: str
-    newName: Union[str, None]
-
-
-redisDB = redis.Redis(host='redis', port=6379)
-chatIdsAddingLocations: List[str] = []
-chatIdsGettingLocations: List[str] = []
-
-
-def fetchWeather(lat: float, lon: float, duration: float) -> WeatherResult:
-    today = datetime.now().isoformat()
-    lastday = (datetime.now() + timedelta(days=duration)).isoformat()
-    forecast = []
-    with urllib.request.urlopen(f"https://api.brightsky.dev/weather?lat={lat}&lon={lon}&date={today}&last_date={lastday}") as url:
-        forecast = json.loads(url.read().decode())
-    weather_station = forecast['sources'][0]['station_name']
-    weather_station_distance = forecast['sources'][0]['distance']
-    dates = []
-    temps = []
-    precs = []
-    suns = []
-    for element in forecast['weather']:
-        dates.append(datetime.strptime(
-            element['timestamp'], '%Y-%m-%dT%H:%M:%S%z'))
-        temps.append(element['temperature'])
-        precs.append(element['precipitation'])
-        suns.append(element['sunshine'] / 0.6)
-    dates = date2num(dates)
-
-    current = []
-    with urllib.request.urlopen(f"https://api.brightsky.dev/current_weather?lat={lat}&lon={lon}") as url:
-        current = json.loads(url.read().decode())
-
-    plot_count = 3
-    fig, axs = plt.subplots(plot_count, 1, figsize=(14, 5 * plot_count))
-    axs = cast(List[Axes], axs)
-
-    axs[0].scatter(dates, temps, c=temps)
-    axs[0].title.set_text('Temperature (°C)')
-
-    axs[1].bar(dates, precs)
-    axs[1].title.set_text('Precipitation (mm/hour)')
-
-    axs[2].bar(dates, suns, color='#D9822B')
-    axs[2].title.set_text('Sunshine (percent/hour)')
-    axs[2].set_ylim([0, 100])
-
-    for ax in axs:
-        ax.xaxis_date()
-        ax.grid(which='major',)
-        ax.set_xlim([dates[0], dates[len(dates) - 1]])
-        ax.xaxis.set_major_formatter(DateFormatter('%a %d.%m'))
-        ax.xaxis.set_major_locator(DayLocator())
-
-    temp_name = tempfile.gettempdir() + '/' + next(
-        tempfile._get_candidate_names()  # type: ignore
-    ) + '.png'
-    plt.savefig(temp_name, bbox_inches='tight')
-    return {
-        'plot': temp_name,
-        'current_temp': current['weather']['temperature'],
-        'current_str': current['weather']['condition'],
-        'weather_station': weather_station.title(),
-        'weather_station_distance': int(weather_station_distance / 100) / 10,
-    }
+    newName: Optional[str]
 
 
 def start(update: Update, context: CallbackContext):
@@ -130,13 +47,15 @@ def start(update: Update, context: CallbackContext):
 
 
 def sendForecast(chat_id: Union[int, str], bot: Bot, lat: float, lon: float, duration: float = 14, name: str = None):
-    result = fetchWeather(lat, lon, duration)
+    waitingMessage = bot.send_message(chat_id, text="⏳")
+    result = fetchAndPlot(lat, lon, duration)
     station_text = f"forecast for {name}." if (
         name != None) else f"forecast for {result['weather_station']} ({result['weather_station_distance']}km from location)."
     bot.send_photo(chat_id,
                    photo=open(result['plot'], 'rb'),
-                   caption=f"{duration} day {station_text}\nCurrently it is {result['current_temp']}°C and {result['current_str']}.",
+                   caption=f"{result['duration']} day {station_text}\nCurrently it is {result['current_temp']}°C and {result['current_str']}.",
                    reply_markup=ReplyKeyboardRemove())
+    bot.delete_message(chat_id=chat_id, message_id=waitingMessage.message_id)
 
 
 def getStuff(update: Update) -> Tuple[str, Message]:
@@ -148,35 +67,22 @@ def getStuff(update: Update) -> Tuple[str, Message]:
     return (update.effective_chat.id, message)
 
 
-def getLocationInfo(lat: float, lon: float) -> Tuple[str, float]:
-    with urllib.request.urlopen(f"https://api.brightsky.dev/sources?lat={lat}&lon={lon}") as url:
-        source = json.loads(url.read().decode())['sources'][0]
-        return (source['station_name'].title(), int(source['distance'] / 100) / 10)
-
-
 def addLocation(chat_id: str, bot: Bot, lat: float, lon: float):
-    locations: List[Location] = []
-    if redisDB.exists(chat_id):
-        locations = json.loads(redisDB.get(chat_id))  # type: ignore
     name, dist = getLocationInfo(lat, lon)
-    locations.append({
+    if db.addLocation(chat_id, {
         'name': name,
         'lat': lat,
         'lon': lon
-    })
-    redisDB.set(chat_id, json.dumps(locations))
-    bot.send_message(
-        chat_id, f"Station '{name}' ({dist}km from location) added.\nIt will be included in '/getall' and you can get it individually by '/get {name}'.")
+    }):
+        bot.send_message(
+            chat_id, f"Station '{name}' ({dist}km from location) added.\nIt will be included in '/getall' and you can get it individually by '/get {name}'.")
+    else:
+        bot.send_message(chat_id, f"Station '{name}' is already added.")
 
 
 def getAll(update: Update, context: CallbackContext):
     chat_id, _ = getStuff(update)
-    if not redisDB.exists(chat_id):
-        context.bot.send_message(
-            chat_id, text=f"You need to add a location with '/add'.")
-        return
-    locations: List[Location] = json.loads(
-        redisDB.get(chat_id))  # type: ignore
+    locations = list(db.getLocations(chat_id))
     if len(locations) == 0:
         context.bot.send_message(
             chat_id, text=f"You need to add a location with '/add'.")
@@ -194,15 +100,32 @@ def callbackDataGet(name: str) -> str:
     })
 
 
+def locationReplyKeyboard(locations: List[Location]) -> ReplyKeyboardMarkup:
+    locationNames = list(map(lambda x: x['name'], locations))
+
+    keyboard = []
+    i = 0
+    while i < len(locationNames) - 1:
+        keyboard.append([
+            KeyboardButton(
+                locationNames[i], callback_data=callbackDataGet(locationNames[i])),
+            KeyboardButton(
+                locationNames[i + 1], callback_data=callbackDataGet(locationNames[i + 1])),
+        ])
+        i += 2
+
+    if len(locationNames) - i == 1:
+        keyboard.append([
+            KeyboardButton(
+                locationNames[i], callback_data=callbackDataGet(locationNames[i]))
+        ])
+    return ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=True)
+
+
 def get(update: Update, context: CallbackContext):
     chat_id, message = getStuff(update)
-    if not redisDB.exists(chat_id):
-        context.bot.send_message(
-            chat_id, text=f"You need to add a location with '/add'.")
-        return
-
-    locations: List[Location] = json.loads(
-        redisDB.get(chat_id))  # type: ignore
+    logging.log(level=logging.INFO, msg=f"Cid: {type(chat_id)}")
+    locations = list(db.getLocations(chat_id))
     if len(locations) == 0:
         context.bot.send_message(
             chat_id, text=f"You need to add a location with '/add'.")
@@ -210,26 +133,9 @@ def get(update: Update, context: CallbackContext):
 
     locationNames = list(map(lambda x: x['name'], locations))
     if context.args != None and len(context.args) == 0:
-        keyboard = []
-        i = 0
-        while i < len(locationNames) - 1:
-            keyboard.append([
-                KeyboardButton(
-                    locationNames[i], callback_data=callbackDataGet(locationNames[i])),
-                KeyboardButton(
-                    locationNames[i + 1], callback_data=callbackDataGet(locationNames[i + 1])),
-            ])
-            i += 2
-
-        if len(locationNames) - i == 1:
-            keyboard.append([
-                KeyboardButton(
-                    locationNames[i], callback_data=callbackDataGet(locationNames[i]))
-            ])
-        if chat_id not in chatIdsGettingLocations:
-            chatIdsGettingLocations.append(chat_id)
-        update.message.reply_text(
-            'Choose a station.', reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=True))
+        db.setState(chat_id, {'type': StateType.GET_LOCATION})
+        message.reply_text(
+            'Choose a station.', reply_markup=locationReplyKeyboard(locations))
         return
 
     if context.args[0] not in locationNames:
@@ -241,56 +147,81 @@ def get(update: Update, context: CallbackContext):
                  location['lat'], location['lon'], name=location['name'])
 
 
-def locationHandle(update: Update, context: CallbackContext):
+def handleLocation(update: Update, context: CallbackContext):
     chat_id, message = getStuff(update)
     lat = message.location.latitude
     lon = message.location.longitude
-    if chat_id in chatIdsAddingLocations:
+    if db.getState(chat_id)['type'] == StateType.ADD_LOCATION:  # type: ignore
         addLocation(chat_id, context.bot, lat, lon)
-        chatIdsAddingLocations.remove(chat_id)
+        db.setState(chat_id, {'type': StateType.IDLE})
     else:
         sendForecast(chat_id, context.bot, lat, lon)
 
 
 def add(update: Update, context: CallbackContext):
     chat_id, message = getStuff(update)
-    if chat_id in chatIdsAddingLocations:
-        return
-    chatIdsAddingLocations.append(chat_id)
+    db.setState(chat_id, {'type': StateType.ADD_LOCATION})
     context.bot.send_message(chat_id, text="Ok, now send a location.")
 
 
-def buttonCallback(update: Update, context: CallbackContext) -> None:
-    query = update.callback_query
-    query.answer()
-    data: ButtonQuery = json.loads(query.data)
-    logging.log(msg=f"{data}", level=logging.INFO)
-    chat_id = query.message.chat_id
-    locations: List[Location] = json.loads(
-        redisDB.get(chat_id))  # type: ignore
-    location = next(filter(lambda x: x['name'] == data['name'], locations))
-    if data['type'] == ButtonQueryType.GET:
-        query.edit_message_text(text=data['name'])
-        sendForecast(chat_id, context.bot,
-                     location['lat'], location['lon'], name=location['name'])
-    elif data['type'] == ButtonQueryType.RENAME:
-        locations
-
-
-def textHandle(update: Update, context: CallbackContext):
+def handleText(update: Update, context: CallbackContext):
     chat_id, message = getStuff(update)
-    logging.log(
-        msg=f"ids: {chatIdsGettingLocations}, id: {chat_id}, '{message.text}'", level=logging.INFO)
-    if chat_id not in chatIdsGettingLocations:
+    state = db.getState(chat_id)
+
+    logging.log(msg=f"text in state {state}", level=logging.INFO)
+    if state['type'] == StateType.GET_LOCATION:  # type: ignore
+        db.setState(chat_id, {'type': StateType.IDLE})
+        locations = db.getLocations(chat_id)
+        location = next(
+            filter(lambda x: x['name'] == message.text, locations), None)
+        if location != None:
+            sendForecast(chat_id, context.bot,
+                         location['lat'], location['lon'], name=location['name'])
+        else:
+            context.bot.send_message(
+                chat_id, text="Invalid station name.", reply_markup=ReplyKeyboardRemove())
+
+    elif state['type'] == StateType.RENAME_LOCATION:  # type: ignore
+        locations = db.getLocations(chat_id)
+
+        # new name
+        if 'location' in state:
+            location = next( filter(lambda x: x['name'] == state['location']['name'], locations), None) # type: ignore
+            if location != None:
+                db.renameLocation(chat_id, location, message.text)
+                context.bot.send_message(
+                    chat_id, f"'{state['location']['name']}' was renamed to '{message.text}'")
+            else:
+                context.bot.send_message(
+                    chat_id, text="Invalid station name.", reply_markup=ReplyKeyboardRemove())
+
+            return
+
+
+        location = next(
+            filter(lambda x: x['name'] == message.text, locations), None)
+        if location != None:
+            db.setState(
+                chat_id, {'type': StateType.RENAME_LOCATION, 'location': location})
+            context.bot.send_message(
+                chat_id, text="Ok. What is the new name?", reply_markup=ReplyKeyboardRemove())
+        else:
+            context.bot.send_message(
+                chat_id, text="Invalid station name.", reply_markup=ReplyKeyboardRemove())
+
+
+def rename(update: Update, context: CallbackContext):
+    chat_id, message = getStuff(update)
+    db.setState(chat_id, {'type': StateType.RENAME_LOCATION})
+
+    locations = list(db.getLocations(chat_id))
+    if len(locations) == 0:
+        context.bot.send_message(
+            chat_id, text=f"You need to add a location with '/add'.")
         return
-    chatIdsGettingLocations.remove(chat_id)
-    locations: List[Location] = json.loads(
-        redisDB.get(chat_id))  # type: ignore
-    location = next(
-        filter(lambda x: x['name'] == message.text, locations), None)
-    if location != None:
-        sendForecast(chat_id, context.bot,
-                     location['lat'], location['lon'], name=location['name'])
+
+    message.reply_text(
+        'Choose a station to rename.', reply_markup=locationReplyKeyboard(locations))
 
 
 updater = Updater(token=os.environ.get('BOT_TOKEN'))
@@ -300,11 +231,11 @@ logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s
                     level=logging.INFO)
 dispatcher.add_handler(CommandHandler('start', start))
 dispatcher.add_handler(CommandHandler('add', add))
-updater.dispatcher.add_handler(CallbackQueryHandler(buttonCallback))
 dispatcher.add_handler(CommandHandler('getAll', getAll))
 dispatcher.add_handler(CommandHandler('get', get))
-dispatcher.add_handler(MessageHandler(Filters.location, locationHandle))
-dispatcher.add_handler(MessageHandler(Filters.text, textHandle))
+dispatcher.add_handler(CommandHandler('rename', rename))
+dispatcher.add_handler(MessageHandler(Filters.location, handleLocation))
+dispatcher.add_handler(MessageHandler(Filters.text, handleText))
 
 
 updater.start_polling()

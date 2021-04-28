@@ -7,5 +7,6 @@ RUN pwd
 COPY ./requirements.txt .
 RUN python -m pip install --no-cache-dir -r requirements.txt
 
-CMD [ "python", "./src/main.py" ]
-# CMD [ "python", "./autoreload.py", "python", "./src/main.py" ]
+RUN python -m pip install -U py-mon colorama watchdog
+
+CMD [ "pymon", "./src/main.py" ]

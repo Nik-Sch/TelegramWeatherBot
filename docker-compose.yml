@@ -5,13 +5,12 @@ services:
     container_name: weatherbot
     restart: always
     depends_on:
-      - redis
+      - mongo
     env_file:
       env.env
 
-  redis:
-    image: redis
-    command: --appendonly yes
+  mongo:
+    image: mongo
     volumes:
       - ./data:/data
     restart: always
