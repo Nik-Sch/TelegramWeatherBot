@@ -150,6 +150,7 @@ def getWrapper(update: Update, context: CallbackContext, detailed: bool):
 def get(update: Update, context: CallbackContext):
     getWrapper(update, context, False)
 
+
 def getDetailed(update: Update, context: CallbackContext):
     getWrapper(update, context, True)
 
@@ -174,10 +175,10 @@ def add(update: Update, context: CallbackContext):
 def handleText(update: Update, context: CallbackContext):
     chat_id, message = getStuff(update)
     state = db.getState(chat_id)
+    db.setState(chat_id, {'type': 'idle'})
 
     logging.log(msg=f"text in state {state}", level=logging.INFO)
     if state['type'] == 'get' or state['type'] == 'getDetailed':  # type: ignore
-        db.setState(chat_id, {'type': 'idle'})
         locations = db.getLocations(chat_id)
         location = next(
             filter(lambda x: x['name'] == message.text, locations), None)
@@ -193,7 +194,7 @@ def handleText(update: Update, context: CallbackContext):
 
         # new name
         if 'location' in state:
-            location = next( filter(lambda x: x['name'] == state['location']['name'], locations), None) # type: ignore
+            location = next(filter(lambda x: x['name'] == state['location']['name'], locations), None)  # type: ignore
             if location != None:
                 db.renameLocation(chat_id, location, message.text)
                 context.bot.send_message(
@@ -201,15 +202,12 @@ def handleText(update: Update, context: CallbackContext):
             else:
                 context.bot.send_message(
                     chat_id, text="Invalid station name.", reply_markup=ReplyKeyboardRemove())
-
             return
-
 
         location = next(
             filter(lambda x: x['name'] == message.text, locations), None)
         if location != None:
-            db.setState(
-                chat_id, {'type': 'rename', 'location': location})
+            db.setState(chat_id, {'type': 'rename', 'location': location})
             context.bot.send_message(
                 chat_id, text="Ok. What is the new name?", reply_markup=ReplyKeyboardRemove())
         else:
