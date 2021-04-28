@@ -76,7 +76,7 @@ def plotOverview(forecast: Any):
     axs[1].bar(rainDates, rainValues, color='#106BA3')
     axs[1].title.set_text('Precipitation (mm/day)')
     axs[1].set_xlim(rainDates[0] - 0.5, rainDates[-1] + 0.5)
-    axs[1].set_ylim([0, max([4, max(rainValues) + 1])])
+    axs[1].set_ylim([0, max([8, max(rainValues) + 1])])
     axs[1].grid(axis='y')
     for i in range(len(rainValues)):
         if rainValues[i] > 0:
