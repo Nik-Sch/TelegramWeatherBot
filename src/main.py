@@ -151,7 +151,7 @@ def get(update: Update, context: CallbackContext):
     getWrapper(update, context, False)
 
 def getDetailed(update: Update, context: CallbackContext):
-    getWrapper(update, context, False)
+    getWrapper(update, context, True)
 
 
 def handleLocation(update: Update, context: CallbackContext):
