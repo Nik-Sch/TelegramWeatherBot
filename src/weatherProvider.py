@@ -149,7 +149,7 @@ def plotDetailed(forecast: Any):
         ax.xaxis.set_major_locator(HourLocator(interval=4))
 
 
-def fetchAndPlot(lat: float, lon: float, duration: float, debug: bool = False) -> WeatherResult:
+def fetchAndPlot(lat: float, lon: float, duration: float, debug: bool = False, jpeg: bool = False) -> WeatherResult:
     if (duration > 10):
         duration = 10
     today = datetime.now().isoformat()
@@ -167,7 +167,7 @@ def fetchAndPlot(lat: float, lon: float, duration: float, debug: bool = False) -
 
     temp_name = tempfile.gettempdir() + '/' + next(
         tempfile._get_candidate_names()  # type: ignore
-    ) + '.png'
+    ) + ('.jpeg' if jpeg else '.png')
     if debug:
         plt.show()
     else:

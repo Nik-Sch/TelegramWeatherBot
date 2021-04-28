@@ -3,13 +3,14 @@ from telegram.ext import (Updater,
                           MessageHandler,
                           Filters,
                           CallbackContext,
-                          CallbackQueryHandler,
+                          InlineQueryHandler,
                           )
 from telegram import (Bot,
                       ReplyKeyboardMarkup,
                       KeyboardButton,
                       Update,
-                      ReplyKeyboardRemove, chat
+                      ReplyKeyboardRemove,
+                      InlineQueryResult
                       )
 import os
 import logging
@@ -21,11 +22,17 @@ from typing import (Optional, Union,
                     cast
                     )
 from enum import Enum
+from telegram.inline.inlinequeryresultphoto import InlineQueryResultPhoto
+from telegram.inline.inlinequeryresultarticle import InlineQueryResultArticle
+from telegram.inline.inputtextmessagecontent import InputTextMessageContent
 
 from telegram.message import Message
-
+import urllib.parse
+import urllib.request
+import requests
 from db import Backend, Location
 from weatherProvider import fetchAndPlot, getLocationInfo
+import base64
 
 db = Backend()
 
@@ -177,7 +184,6 @@ def handleText(update: Update, context: CallbackContext):
     state = db.getState(chat_id)
     db.setState(chat_id, {'type': 'idle'})
 
-    logging.log(msg=f"text in state {state}", level=logging.INFO)
     if state['type'] == 'get' or state['type'] == 'getDetailed':  # type: ignore
         locations = db.getLocations(chat_id)
         location = next(
@@ -229,6 +235,41 @@ def rename(update: Update, context: CallbackContext):
         'Choose a station to rename.', reply_markup=locationReplyKeyboard(locations))
 
 
+def handleInlineQuery(update: Update, context: CallbackContext):
+    query = update.inline_query.query
+
+    locationResults = {}
+    with urllib.request.urlopen(f"https://nominatim.openstreetmap.org/search?q={urllib.parse.quote(query, safe='')}&addressdetails=1&format=jsonv2") as url:
+        locationResults = json.loads(url.read().decode())
+
+    answers: List[InlineQueryResult] = []
+    for locationResult in locationResults[:1]:
+        imageResult = fetchAndPlot(locationResult['lat'], locationResult['lon'], 10, jpeg=True)
+
+        url = "https://api.imgur.com/3/image"
+        payload = {'image': base64.b64encode(open(imageResult['plot'], 'rb').read())}
+        headers = {
+            'Authorization': f"Client-ID {os.environ.get('IMGUR_CLIENT_ID')}"
+        }
+        uploadResponse = requests.request("POST", url, headers=headers, data=payload, files=[])
+        # logging.log(msg=uploadResponse.text, level=20)
+        uploadJson = json.loads(uploadResponse.text)
+        link = uploadJson['data']['link']
+
+        answers.append(
+            InlineQueryResultPhoto(
+                id=uploadJson['data']['id'],
+                photo_url=link,
+                thumb_url=link.replace('.jpg', 's.jpg'),
+                photo_height=uploadJson['data']['height'],
+                photo_width=uploadJson['data']['width'],
+                description=f"Weather for {imageResult['weather_station']}",
+                caption=f"Weather for {imageResult['weather_station']}",
+                title=imageResult['weather_station'],
+            )
+        )
+    context.bot.answer_inline_query(update.inline_query.id, results=answers, cache_time=10)
+
 updater = Updater(token=os.environ.get('BOT_TOKEN'))
 dispatcher = updater.dispatcher
 
@@ -242,6 +283,7 @@ dispatcher.add_handler(CommandHandler('getDetailed', getDetailed))
 dispatcher.add_handler(CommandHandler('rename', rename))
 dispatcher.add_handler(MessageHandler(Filters.location, handleLocation))
 dispatcher.add_handler(MessageHandler(Filters.text, handleText))
+dispatcher.add_handler(InlineQueryHandler(handleInlineQuery))
 
 
 updater.start_polling()
