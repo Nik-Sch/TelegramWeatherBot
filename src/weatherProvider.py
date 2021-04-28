@@ -13,11 +13,11 @@ import tempfile
 from typing import Any, Dict, List, Tuple, TypedDict, cast
 from scipy.signal import find_peaks
 import numpy as np
-from scipy.signal.filter_design import EPSILON
+import io
 
 
 class WeatherResult(TypedDict):
-    plot: str
+    plot: io.BytesIO
     duration: float
     current_temp: float
     current_str: str
@@ -165,19 +165,21 @@ def fetchAndPlot(lat: float, lon: float, duration: float, debug: bool = False, j
     else:
         plotDetailed(forecast)
 
-    temp_name = tempfile.gettempdir() + '/' + next(
-        tempfile._get_candidate_names()  # type: ignore
-    ) + ('.jpeg' if jpeg else '.png')
+    # temp_name = tempfile.gettempdir() + '/' + next(
+    #     tempfile._get_candidate_names()  # type: ignore
+    # ) + ('.jpeg' if jpeg else '.png')
+    outbuffer = io.BytesIO()
     if debug:
         plt.show()
     else:
-        plt.savefig(temp_name, bbox_inches='tight')
+        plt.savefig(outbuffer, format='jpeg' if jpeg else 'png', bbox_inches='tight')
+        outbuffer.seek(0)
 
     current = []
     with urllib.request.urlopen(f"https://api.brightsky.dev/current_weather?lat={lat}&lon={lon}") as url:
         current = json.loads(url.read().decode())
     return {
-        'plot': temp_name,
+        'plot': outbuffer,
         'duration': duration,
         'current_temp': current['weather']['temperature'],
         'current_str': current['weather']['condition'],

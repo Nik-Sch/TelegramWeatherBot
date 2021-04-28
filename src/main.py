@@ -57,7 +57,7 @@ def sendForecast(chat_id: Union[int, str], bot: Bot, lat: float, lon: float, det
     station_text = f"forecast for {name}." if (
         name != None) else f"forecast for {result['weather_station']} ({result['weather_station_distance']}km from location)."
     bot.send_photo(chat_id,
-                   photo=open(result['plot'], 'rb'),
+                   photo=result['plot'],
                    caption=f"{result['duration']} day {station_text}\nCurrently it is {result['current_temp']}°C and {result['current_str']}.",
                    reply_markup=ReplyKeyboardRemove())
     bot.delete_message(chat_id=chat_id, message_id=waitingMessage.message_id)
@@ -245,7 +245,7 @@ def handleInlineQuery(update: Update, context: CallbackContext):
         imageResult = fetchAndPlot(locationResult['lat'], locationResult['lon'], 60*60, jpeg=True)
 
         url = "https://api.imgur.com/3/image"
-        payload = {'image': base64.b64encode(open(imageResult['plot'], 'rb').read())}
+        payload = {'image': base64.b64encode(imageResult['plot'].read())}
         headers = {
             'Authorization': f"Client-ID {os.environ.get('IMGUR_CLIENT_ID')}"
         }
