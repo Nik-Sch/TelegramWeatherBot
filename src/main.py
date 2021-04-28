@@ -46,9 +46,9 @@ def start(update: Update, context: CallbackContext):
         chat_id=update.effective_chat.id, text="Send me locations and I will answer with the weather.")
 
 
-def sendForecast(chat_id: Union[int, str], bot: Bot, lat: float, lon: float, duration: float = 14, name: str = None):
+def sendForecast(chat_id: Union[int, str], bot: Bot, lat: float, lon: float, detailed: bool, name: str = None):
     waitingMessage = bot.send_message(chat_id, text="⏳")
-    result = fetchAndPlot(lat, lon, duration)
+    result = fetchAndPlot(lat, lon, 10 if detailed else 1.5)
     station_text = f"forecast for {name}." if (
         name != None) else f"forecast for {result['weather_station']} ({result['weather_station_distance']}km from location)."
     bot.send_photo(chat_id,
@@ -90,7 +90,7 @@ def getAll(update: Update, context: CallbackContext):
 
     for location in locations:
         sendForecast(chat_id, context.bot,
-                     location['lat'], location['lon'], name=location['name'])
+                     location['lat'], location['lon'], False, name=location['name'])
 
 
 def callbackDataGet(name: str) -> str:
@@ -144,7 +144,7 @@ def getWrapper(update: Update, context: CallbackContext, detailed: bool):
         return
     location = next(filter(lambda x: x['name'] == context.args[0], locations))
     sendForecast(chat_id, context.bot,
-                 location['lat'], location['lon'], name=location['name'])
+                 location['lat'], location['lon'], detailed, name=location['name'])
 
 
 def get(update: Update, context: CallbackContext):
@@ -162,7 +162,7 @@ def handleLocation(update: Update, context: CallbackContext):
         addLocation(chat_id, context.bot, lat, lon)
         db.setState(chat_id, {'type': 'idle'})
     else:
-        sendForecast(chat_id, context.bot, lat, lon)
+        sendForecast(chat_id, context.bot, lat, lon, False)
 
 
 def add(update: Update, context: CallbackContext):
@@ -183,7 +183,7 @@ def handleText(update: Update, context: CallbackContext):
             filter(lambda x: x['name'] == message.text, locations), None)
         if location != None:
             sendForecast(chat_id, context.bot,
-                         location['lat'], location['lon'], name=location['name'], duration=10 if state['type'] == 'get' else 1.5)  # type: ignore
+                         location['lat'], location['lon'], name=location['name'], detailed=state['type'] == 'get')  # type: ignore
         else:
             context.bot.send_message(
                 chat_id, text="Invalid station name.", reply_markup=ReplyKeyboardRemove())
