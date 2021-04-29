@@ -1,0 +1,4 @@
+{
+  "atomKeymap.promptV3Features": false,
+  "python.analysis.extraPaths": ["./bot", "./image-host"]
+}

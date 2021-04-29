@@ -31,7 +31,7 @@ import urllib.parse
 import urllib.request
 import requests
 from db import Backend, Location
-from weatherProvider import fetchAndPlot, getLocationInfo
+from weatherProvider import debugTest, fetchAndPlot, getLocationInfo
 import base64
 
 db = Backend()
@@ -129,7 +129,6 @@ def locationReplyKeyboard(locations: List[Location]) -> ReplyKeyboardMarkup:
 
 def getWrapper(update: Update, context: CallbackContext, detailed: bool):
     chat_id, message = getStuff(update)
-    logging.log(level=logging.INFO, msg=f"Cid: {type(chat_id)}")
     locations = list(db.getLocations(chat_id))
     if len(locations) == 0:
         context.bot.send_message(
@@ -244,13 +243,9 @@ def handleInlineQuery(update: Update, context: CallbackContext):
     for locationResult in locationResults[:1]:
         imageResult = fetchAndPlot(locationResult['lat'], locationResult['lon'], 60*60, jpeg=True)
 
-        url = "https://api.imgur.com/3/image"
+        url = "http://image-host"
         payload = {'image': base64.b64encode(imageResult['plot'].read())}
-        headers = {
-            'Authorization': f"Client-ID {os.environ.get('IMGUR_CLIENT_ID')}"
-        }
-        uploadResponse = requests.request("POST", url, headers=headers, data=payload, files=[])
-        # logging.log(msg=uploadResponse.text, level=20)
+        uploadResponse = requests.request("POST", url, data=payload, files=[])
         uploadJson = json.loads(uploadResponse.text)
         link = uploadJson['data']['link']
 
@@ -269,6 +264,12 @@ def handleInlineQuery(update: Update, context: CallbackContext):
     context.bot.answer_inline_query(update.inline_query.id, results=answers, cache_time=10)
 
 
+def debugStuff(update: Update, context: CallbackContext):
+    chat_id, message = getStuff(update)
+    context.bot.send_message(chat_id, text=f"Answer.")
+    logging.log(msg=f"debug", level=20)
+    debugTest()
+
 updater = Updater(token=os.environ.get('BOT_TOKEN'))
 dispatcher = updater.dispatcher
 
@@ -280,6 +281,7 @@ dispatcher.add_handler(CommandHandler('getAll', getAll))
 dispatcher.add_handler(CommandHandler('get', get))
 dispatcher.add_handler(CommandHandler('getDetailed', getDetailed))
 dispatcher.add_handler(CommandHandler('rename', rename))
+dispatcher.add_handler(CommandHandler('debug', debugStuff))
 dispatcher.add_handler(MessageHandler(Filters.location, handleLocation))
 dispatcher.add_handler(MessageHandler(Filters.text, handleText))
 dispatcher.add_handler(InlineQueryHandler(handleInlineQuery))

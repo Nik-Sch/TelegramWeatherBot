@@ -1,0 +1,10 @@
+FROM python:3.9.4-buster
+
+WORKDIR /usr/src/app
+
+RUN ls
+RUN pwd
+COPY ./image-host/requirements.txt .
+RUN python -m pip install --no-cache-dir -r requirements.txt
+
+CMD [ "python", "./main.py" ]

@@ -1,7 +1,11 @@
 
+import base64
 from datetime import datetime, timedelta
 import json
+import logging
+import os
 from matplotlib import pyplot as plt
+import matplotlib
 from matplotlib.axes import Axes
 from matplotlib.dates import (date2num,
                               DateFormatter,
@@ -9,11 +13,12 @@ from matplotlib.dates import (date2num,
                               HourLocator,
                               )
 import urllib.request
-import tempfile
 from typing import Any, Dict, List, Tuple, TypedDict, cast
+import requests
 from scipy.signal import find_peaks
 import numpy as np
 import io
+import time
 
 
 class WeatherResult(TypedDict):
@@ -155,25 +160,35 @@ def fetchAndPlot(lat: float, lon: float, duration: float, debug: bool = False, j
     today = datetime.now().isoformat()
     lastday = (datetime.now() + timedelta(days=duration)).isoformat()
     forecast = {}
+    t1 = time.perf_counter()
     with urllib.request.urlopen(f"https://api.brightsky.dev/weather?lat={lat}&lon={lon}&date={today}&last_date={lastday}") as url:
-        forecast = json.loads(url.read().decode())
+        text = url.read().decode()
+        t2 = time.perf_counter()
+        forecast = json.loads(text)
+        # print(f"fetch: {(t2 - t1) * 1000}ms")
     weather_station = forecast['sources'][0]['station_name']
     weather_station_distance = forecast['sources'][0]['distance']
 
+    t1 = time.perf_counter()
     if duration > 2:
         plotOverview(forecast)
     else:
         plotDetailed(forecast)
+    t2 = time.perf_counter()
+    # print(f"plot: {(t2 - t1) * 1000}ms")
 
     # temp_name = tempfile.gettempdir() + '/' + next(
     #     tempfile._get_candidate_names()  # type: ignore
     # ) + ('.jpeg' if jpeg else '.png')
     outbuffer = io.BytesIO()
+    t1 = time.perf_counter()
     if debug:
         plt.show()
     else:
         plt.savefig(outbuffer, format='jpeg' if jpeg else 'png', bbox_inches='tight')
         outbuffer.seek(0)
+    t2 = time.perf_counter()
+    # print(f"savefig: {(t2 - t1) * 1000}ms")
 
     current = []
     with urllib.request.urlopen(f"https://api.brightsky.dev/current_weather?lat={lat}&lon={lon}") as url:
@@ -193,6 +208,30 @@ def getLocationInfo(lat: float, lon: float) -> Tuple[str, float]:
         source = json.loads(url.read().decode())['sources'][0]
         return (source['station_name'].title(), int(source['distance'] / 100) / 10)
 
+def debugTest():
+    locationResults = {}
+    t1 = time.perf_counter()
+    with urllib.request.urlopen(f"https://nominatim.openstreetmap.org/search?q=Berlin&addressdetails=1&format=jsonv2") as url:
+        locationResults = json.loads(url.read().decode())
+    t2 = time.perf_counter()
+    logging.log(msg=f"osm: {(t2 - t1) * 1000}ms", level=20)
+
+    for locationResult in locationResults[:1]:
+        t1 = time.perf_counter()
+        imageResult = fetchAndPlot(locationResult['lat'], locationResult['lon'], 60*60, jpeg=True)
+        t2 = time.perf_counter()
+        logging.log(msg=f"plot: {(t2 - t1) * 1000}ms", level=20)
+
+        t1 = time.perf_counter()
+        url = "http://image-host/image"
+        payload = {'image': imageResult['plot'].read()}
+        uploadResponse = requests.request("POST", url, files=payload)
+        logging.log(msg=f"upload response: {uploadResponse.text}", level=20)
+        uploadJson = json.loads(uploadResponse.text)
+        t2 = time.perf_counter()
+        logging.log(msg=f"upload: {(t2 - t1) * 1000}ms", level=20)
+        link = uploadJson['link']
+        logging.log(msg=link, level=20)
 
 if __name__ == "__main__":
-    fetchAndPlot(52.180687, 13.579082, 1.5, debug=True)
+    debugTest()

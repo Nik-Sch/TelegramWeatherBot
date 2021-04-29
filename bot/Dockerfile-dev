@@ -4,9 +4,9 @@ WORKDIR /usr/src/app
 
 RUN ls
 RUN pwd
-COPY ./requirements.txt .
+COPY ./bot/requirements.txt .
 RUN python -m pip install --no-cache-dir -r requirements.txt
 
 RUN python -m pip install -U py-mon colorama watchdog
 
-CMD [ "pymon", "./src/main.py" ]
+CMD [ "pymon", "./main.py" ]

@@ -1,13 +1,20 @@
 version: '2.0'
 services:
   app:
-    build: .
+    build: bot
     container_name: weatherbot
     restart: always
     depends_on:
       - mongo
+      - image-host
     env_file:
       env.env
+
+  image-host:
+    build: image-host
+    volumes:
+      - ./images:/data
+    restart: always
 
   mongo:
     image: mongo

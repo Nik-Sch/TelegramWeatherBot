@@ -3,7 +3,7 @@ services:
   app:
     build:
       context: ./
-      dockerfile: Dockerfile-dev
+      dockerfile: bot/Dockerfile-dev
     container_name: weatherbot
     restart: always
     depends_on:
@@ -11,7 +11,19 @@ services:
     env_file:
       env.env
     volumes:
-      - ./:/usr/src/app
+      - ./bot:/usr/src/app
+
+
+  image-host:
+    build:
+      context: ./
+      dockerfile: image-host/Dockerfile-dev
+    volumes:
+      - ./images:/data
+      - ./image-host:/usr/src/app
+    ports:
+      - 8000:80
+    restart: always
 
   mongo:
     image: mongo
