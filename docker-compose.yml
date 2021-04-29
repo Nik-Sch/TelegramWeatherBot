@@ -14,6 +14,8 @@ services:
     build: image-host
     volumes:
       - ./images:/data
+    env_file:
+      env.env
     restart: always
 
   mongo:

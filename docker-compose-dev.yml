@@ -21,6 +21,8 @@ services:
     volumes:
       - ./images:/data
       - ./image-host:/usr/src/app
+    env_file:
+      env.env
     ports:
       - 8000:80
     restart: always
