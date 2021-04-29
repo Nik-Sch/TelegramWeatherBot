@@ -390,13 +390,6 @@ def handleInlineQuery(update: Update, context: CallbackContext):
     context.bot.answer_inline_query(queryId, results=answers, cache_time=60 * 30, next_offset=str(nextOffset))
 
 
-def debugStuff(update: Update, context: CallbackContext):
-    chat_id, message = getStuff(update)
-    context.bot.send_message(chat_id, text=f"Answer.")
-    logging.log(msg=f"debug", level=20)
-    debugTest()
-
-
 updater = Updater(token=os.environ.get('BOT_TOKEN'))
 dispatcher = updater.dispatcher
 
@@ -408,7 +401,6 @@ dispatcher.add_handler(CommandHandler('getAll', getAll))
 dispatcher.add_handler(CommandHandler('get', get))
 dispatcher.add_handler(CommandHandler('getDetailed', getDetailed))
 dispatcher.add_handler(CommandHandler('rename', rename))
-dispatcher.add_handler(CommandHandler('debug', debugStuff))
 dispatcher.add_handler(MessageHandler(Filters.location, handleLocation))
 dispatcher.add_handler(MessageHandler(Filters.text, handleText))
 dispatcher.add_handler(InlineQueryHandler(handleInlineQuery))
