@@ -1,6 +1,6 @@
 version: '2.0'
 services:
-  app:
+  bot:
     build: bot
     container_name: weatherbot
     restart: always
@@ -9,17 +9,32 @@ services:
       - image-host
     env_file:
       env.env
+    networks:
+      - weatherbot
 
   image-host:
     build: image-host
+    container_name: weatherimages
     volumes:
       - ./images:/data
     env_file:
       env.env
     restart: always
+    networks:
+      - weatherbot
+      - system-proxy_default
 
   mongo:
     image: mongo
     volumes:
       - ./data:/data
     restart: always
+    networks:
+      - weatherbot
+
+
+networks:
+  weatherbot:
+    driver: bridge
+  system-proxy_default:
+    external: true

@@ -1,3 +1,4 @@
+from numpy import imag
 from telegram.ext import (Updater,
                           CommandHandler,
                           MessageHandler,
@@ -15,7 +16,7 @@ from telegram import (Bot,
 import os
 import logging
 import json
-from typing import (Optional, Union,
+from typing import (Any, Literal, Optional, Union,
                     List,
                     Tuple,
                     TypedDict,
@@ -32,35 +33,93 @@ import urllib.request
 import requests
 from db import Backend, Location
 from weatherProvider import debugTest, fetchAndPlot, getLocationInfo
-import base64
+import threading
+import functools
 
 db = Backend()
 
 
-class ButtonQueryType(str, Enum):
-    GET = 'get'
-    RENAME = 'rename'
-
-
 class ButtonQuery(TypedDict):
-    type: ButtonQueryType
+    type: Literal['get', 'rename']
     name: str
     newName: Optional[str]
+
+
+class ImageResult(TypedDict):
+    imageId: str
+    imageLink: str
+    thumbLink: str
+    duration: float
+    current_temp: float
+    current_str: str
+    weather_station: str
+    weather_station_distance: float
+    width: int
+    height: int
+
+
+class UploadResult(TypedDict):
+    id: str
+    link: str
+    thumb: str
+    width: int
+    height: int
 
 
 def start(update: Update, context: CallbackContext):
     context.bot.send_message(chat_id=update.effective_chat.id, text="Send me locations and I will answer with the weather.")
 
+
+@functools.lru_cache(maxsize=100, typed=False)
+def getImage(lat: float, lon: float, detailed: bool) -> Optional[ImageResult]:
+    imageResult = fetchAndPlot(lat, lon, 10 if detailed else 1.5)
+    if imageResult == None:
+        return None
+
+    url = "http://image-host/image"
+    files = {'image': imageResult['plot'].read()}
+
+    uploadResponse = requests.request("POST", url, files=files)
+    uploadJson = cast(UploadResult, json.loads(uploadResponse.text))
+    return {
+        'imageId': uploadJson['id'],
+        'imageLink': uploadJson['link'],
+        'thumbLink': uploadJson['thumb'],
+        'width': uploadJson['width'],
+        'height': uploadJson['height'],
+        'duration': imageResult['duration'],
+        'current_temp': imageResult['current_temp'],
+        'current_str': imageResult['current_str'],
+        'weather_station': imageResult['weather_station'],
+        'weather_station_distance': imageResult['weather_station_distance'],
+    }
+
+
+def clearCache():
+    logging.log(msg=getImage.cache_info(), level=20)
+    logging.log(msg="clearing cache", level=20)
+    getImage.cache_clear()
+    threading.Timer(60 * 30, clearCache).start()
+
+
 def sendForecast(chat_id: Union[int, str], bot: Bot, lat: float, lon: float, detailed: bool, name: str = None):
     waitingMessage = bot.send_message(chat_id, text="⏳")
-    result = fetchAndPlot(lat, lon, 10 if detailed else 1.5)
-    station_text = f"forecast for {name}." if (
-        name != None) else f"forecast for {result['weather_station']} ({result['weather_station_distance']}km from location)."
-    bot.send_photo(chat_id,
-                   photo=result['plot'],
-                   caption=f"{result['duration']} day {station_text}\nCurrently it is {result['current_temp']}°C and {result['current_str']}.",
-                   reply_markup=ReplyKeyboardRemove())
-    bot.delete_message(chat_id=chat_id, message_id=waitingMessage.message_id)
+    try:
+        result = getImage(lat, lon, detailed)
+        if result == None:
+            bot.send_message(chat_id, text="The location has no weather data.")
+            return
+
+        station_text = f"forecast for {name}." if (
+            name != None) else f"forecast for {result['weather_station']} ({result['weather_station_distance']}km from location)."
+        bot.send_photo(chat_id,
+                       photo=result['imageLink'],
+                       caption=f"{result['duration']} day {station_text}\nCurrently it is {result['current_temp']}°C and {result['current_str']}.",
+                       reply_markup=ReplyKeyboardRemove())
+    except:
+        bot.send_message(chat_id, text="Uh oh, an error occured.")
+    finally:
+        bot.delete_message(chat_id=chat_id, message_id=waitingMessage.message_id)
 
 
 def getStuff(update: Update) -> Tuple[str, Message]:
@@ -95,14 +154,7 @@ def getAll(update: Update, context: CallbackContext):
 
     for location in locations:
         sendForecast(chat_id, context.bot,
-                     location['lat'], location['lon'], False, name=location['name'])
-
-
-def callbackDataGet(name: str) -> str:
-    return json.dumps({
-        'type': ButtonQueryType.GET,
-        'name': name
-    })
+                     location['lat'], location['lon'], True, name=location['name'])
 
 
 def locationReplyKeyboard(locations: List[Location]) -> ReplyKeyboardMarkup:
@@ -111,19 +163,11 @@ def locationReplyKeyboard(locations: List[Location]) -> ReplyKeyboardMarkup:
     keyboard = []
     i = 0
     while i < len(locationNames) - 1:
-        keyboard.append([
-            KeyboardButton(
-                locationNames[i], callback_data=callbackDataGet(locationNames[i])),
-            KeyboardButton(
-                locationNames[i + 1], callback_data=callbackDataGet(locationNames[i + 1])),
-        ])
+        keyboard.append([locationNames[i], locationNames[i + 1]])
         i += 2
 
     if len(locationNames) - i == 1:
-        keyboard.append([
-            KeyboardButton(
-                locationNames[i], callback_data=callbackDataGet(locationNames[i]))
-        ])
+        keyboard.append([locationNames[i]])
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=True)
 
 
@@ -216,6 +260,23 @@ def handleText(update: Update, context: CallbackContext):
         else:
             context.bot.send_message(
                 chat_id, text="Invalid station name.", reply_markup=ReplyKeyboardRemove())
+    elif state['type'] == 'add':  # type: ignore
+        if 'addLocations' in state:
+            selectedLocation = next(filter(lambda l: l['name'] == message.text, state['addLocations']))
+            if selectedLocation != None:
+                addLocation(chat_id, context.bot, selectedLocation['lat'], selectedLocation['lon'])
+            else:
+                context.bot.send_message(chat_id, text="Invalid location selected.", reply_markup=ReplyKeyboardRemove())
+            db.setState(chat_id, {'type': 'idle'})
+        else:
+            addLocations = queryLocations(message.text)
+            db.setState(chat_id, {
+                'type': 'add',
+                'addLocations': addLocations
+            })
+            context.bot.send_message(chat_id,
+                                    text="I have found these locations matching. Choose one:",
+                                    reply_markup=locationReplyKeyboard(addLocations))
 
 
 def rename(update: Update, context: CallbackContext):
@@ -232,36 +293,72 @@ def rename(update: Update, context: CallbackContext):
         'Choose a station to rename.', reply_markup=locationReplyKeyboard(locations))
 
 
+def osmToLocation(element: Any) -> Location:
+    return {
+        'lat': element['lat'],
+        'lon': element['lon'],
+        'name': element['display_name']
+    }
+
+
+def queryLocations(query: str) -> List[Location]:
+    with urllib.request.urlopen(f"https://nominatim.openstreetmap.org/search?q={urllib.parse.quote(query, safe='')}&format=jsonv2") as url:
+        return list(map(osmToLocation, json.loads(url.read().decode())))
+
+
+currentQueryResult = {}
+
+
 def handleInlineQuery(update: Update, context: CallbackContext):
     query = update.inline_query.query
+    queryId = update.inline_query.id
+    currentOffset = update.inline_query.offset
+    if currentOffset == 'None':
+        return
+    try:
+        currentOffset = int(currentOffset)
+    except:
+        currentOffset = 0
+    logging.log(msg=f"{queryId} ({query}): current offset: {currentOffset}", level=20)
 
     locationResults = {}
-    with urllib.request.urlopen(f"https://nominatim.openstreetmap.org/search?q={urllib.parse.quote(query, safe='')}&addressdetails=1&format=jsonv2") as url:
-        locationResults = json.loads(url.read().decode())
+    if queryId in currentQueryResult:
+        logging.log(msg=f"{queryId} ({query}): using cache", level=20)
+        locationResults = currentQueryResult[queryId]
+    else:
+        locationResults = queryLocations(query)
+        currentQueryResult[queryId] = locationResults
 
     answers: List[InlineQueryResult] = []
-    for locationResult in locationResults[:1]:
-        imageResult = fetchAndPlot(locationResult['lat'], locationResult['lon'], 60*60, jpeg=True)
 
-        url = "http://image-host"
-        payload = {'image': base64.b64encode(imageResult['plot'].read())}
-        uploadResponse = requests.request("POST", url, data=payload, files=[])
-        uploadJson = json.loads(uploadResponse.text)
-        link = uploadJson['data']['link']
-
-        answers.append(
-            InlineQueryResultPhoto(
-                id=uploadJson['data']['id'],
-                photo_url=link,
-                thumb_url=link.replace('.jpg', 's.jpg'),
-                photo_height=uploadJson['data']['height'],
-                photo_width=uploadJson['data']['width'],
-                description=f"Weather for {imageResult['weather_station']}",
-                caption=f"Weather for {imageResult['weather_station']}",
-                title=imageResult['weather_station'],
+    while len(answers) == 0 and len(locationResults) > currentOffset:
+        imageResult = getImage(locationResults[currentOffset]['lat'], locationResults[currentOffset]['lon'], True)
+        if imageResult != None:
+            text = f"Weather for station {imageResult['weather_station']}. Searched for '{query}'."
+            answers.append(
+                InlineQueryResultPhoto(
+                    id=imageResult['imageId'],
+                    photo_url=imageResult['imageLink'],
+                    thumb_url=imageResult['thumbLink'],
+                    photo_height=imageResult['height'],
+                    photo_width=imageResult['width'],
+                    description=text,
+                    caption=text,
+                    title=imageResult['weather_station'],
+                )
             )
-        )
-    context.bot.answer_inline_query(update.inline_query.id, results=answers, cache_time=10)
+        else:
+            currentOffset += 1
+
+    nextOffset = None
+    if len(locationResults) > currentOffset + 1:
+        logging.log(msg=f"{queryId} ({query}): requesting: {currentOffset + 1}/{len(locationResults)}", level=20)
+        nextOffset = currentOffset + 1
+    else:
+        logging.log(msg=f"{queryId} ({query}): finished ({len(locationResults)})", level=20)
+        if queryId in currentQueryResult:
+            del currentQueryResult[queryId]
+    context.bot.answer_inline_query(queryId, results=answers, cache_time=60 * 30, next_offset=str(nextOffset))
 
 
 def debugStuff(update: Update, context: CallbackContext):
@@ -269,6 +366,7 @@ def debugStuff(update: Update, context: CallbackContext):
     context.bot.send_message(chat_id, text=f"Answer.")
     logging.log(msg=f"debug", level=20)
     debugTest()
+
 
 updater = Updater(token=os.environ.get('BOT_TOKEN'))
 dispatcher = updater.dispatcher
@@ -286,5 +384,6 @@ dispatcher.add_handler(MessageHandler(Filters.location, handleLocation))
 dispatcher.add_handler(MessageHandler(Filters.text, handleText))
 dispatcher.add_handler(InlineQueryHandler(handleInlineQuery))
 
+clearCache()
 
 updater.start_polling()

@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import Iterator, Literal, TypedDict
+from typing import Iterator, List, Literal, TypedDict
 from pymongo import MongoClient
 from pymongo.database import Database
 
@@ -12,6 +12,7 @@ class Location(TypedDict):
 class State(TypedDict, total=False):
     type: Literal['idle', 'get', 'getDetailed', 'add', 'rename']
     location: Location # NotRequired[Location] doesn't work...
+    addLocations: List[Location] # NotRequired[Location] doesn't work...
 
 
 class Backend():

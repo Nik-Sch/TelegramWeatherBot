@@ -13,7 +13,8 @@ from matplotlib.dates import (date2num,
                               HourLocator,
                               )
 import urllib.request
-from typing import Any, Dict, List, Tuple, TypedDict, cast
+from typing import Any, Dict, List, Optional, Tuple, TypedDict, Union, cast
+from numpy.lib import math
 import requests
 from scipy.signal import find_peaks
 import numpy as np
@@ -37,71 +38,82 @@ def plotOverview(forecast: Any):
     for element in forecast['weather']:
         dateWithTime = datetime.strptime(element['timestamp'], '%Y-%m-%dT%H:%M:%S%z')
         date = dateWithTime.replace(hour=0, minute=0, second=0)
-        temps[dateWithTime] = temps.get(dateWithTime, 0) + element['temperature']
-        rainfall[date] = rainfall.get(date, 0) + element['precipitation']
-        sunhours[date] = sunhours.get(date, 0) + element['sunshine']
+        if 'temperature' in element and element['temperature'] != None:
+            temps[dateWithTime] = temps.get(dateWithTime, 0) + element['temperature']
+        if 'precipitation' in element and element['precipitation'] != None:
+            rainfall[date] = rainfall.get(date, 0) + element['precipitation']
+        if 'sunshine' in element and element['sunshine'] != None:
+            sunhours[date] = sunhours.get(date, 0) + element['sunshine']
 
-    plot_count = 3
+    plot_count = (len(temps) > 0) + (len(rainfall) > 0) + (len(sunhours) > 0)
     fig, axs = plt.subplots(plot_count, 1, figsize=(14, 5 * plot_count))
     axs = cast(List[Axes], axs)
 
-    x, y = zip(*sorted(temps.items()))
-    tempDates = np.array(date2num(x))
-    tempValues = np.array(y)
+    current = 0
 
-    axs[0].scatter(tempDates, tempValues, c=tempValues)
-    axs[0].title.set_text('Temperature (°C)')
+    if len(temps) > 0:
+        x, y = zip(*sorted(temps.items()))
+        tempDates = np.array(date2num(x))
+        tempValues = np.array(y)
 
-    maxima, _ = find_peaks(tempValues, prominence=1)
-    maxima = list(maxima)
-    maxima.sort(key=lambda peak: tempValues[peak])
-    maxima = maxima[-3:]
-    axs[0].plot(tempDates[maxima], tempValues[maxima], 'x', c='#C23030')
-    for peak in maxima:
-        axs[0].text(tempDates[peak] + 0.1, tempValues[peak] + 0.1,
-                    f"{int(np.round(tempValues[peak]))}°C", in_layout=True, c='#C23030')
+        axs[current].scatter(tempDates, tempValues, c=tempValues)
+        axs[current].title.set_text('Temperature (°C)')
 
-    minima, _ = find_peaks(-tempValues, prominence=1)
-    minima = list(minima)
-    minima.sort(key=lambda peak: tempValues[peak])
-    minima = minima[:3]
-    axs[0].plot(tempDates[minima], tempValues[minima], 'x', c='#106BA3')
-    for peak in minima:
-        axs[0].text(tempDates[peak] + 0.1, tempValues[peak] - 0.1,
-                    f"{int(np.round(tempValues[peak]))}°C", in_layout=True, va='top', c='#106BA3')
+        maxima, _ = find_peaks(tempValues, prominence=1)
+        maxima = list(maxima)
+        maxima.sort(key=lambda peak: tempValues[peak])
+        maxima = maxima[-3:]
+        axs[current].plot(tempDates[maxima], tempValues[maxima], 'x', c='#C23030')
+        for peak in maxima:
+            axs[current].text(tempDates[peak] + 0.1, tempValues[peak] + 0.1,
+                        f"{int(np.round(tempValues[peak]))}°C", in_layout=True, c='#C23030')
 
-    axs[0].set_ylim([min(tempValues) - 1.2,
-                    max(tempValues) + 1.2])
-    axs[0].set_xlim(tempDates[0], tempDates[-1])
-    axs[0].grid(which='major',)
+        minima, _ = find_peaks(-tempValues, prominence=1)
+        minima = list(minima)
+        minima.sort(key=lambda peak: tempValues[peak])
+        minima = minima[:3]
+        axs[current].plot(tempDates[minima], tempValues[minima], 'x', c='#106BA3')
+        for peak in minima:
+            axs[current].text(tempDates[peak] + 0.1, tempValues[peak] - 0.1,
+                        f"{int(np.round(tempValues[peak]))}°C", in_layout=True, va='top', c='#106BA3')
 
-    x, y = zip(*sorted(rainfall.items()))
-    rainDates = np.array(date2num(x))
-    rainValues = np.array(y)
-    axs[1].bar(rainDates, rainValues, color='#106BA3')
-    axs[1].title.set_text('Precipitation (mm/day)')
-    axs[1].set_xlim(rainDates[0] - 0.5, rainDates[-1] + 0.5)
-    axs[1].set_ylim([0, max([8, max(rainValues) + 1])])
-    axs[1].grid(axis='y')
-    for i in range(len(rainValues)):
-        if rainValues[i] > 0:
-            axs[1].text(rainDates[i], rainValues[i] + 0.2,
-                        f"{int(np.round(rainValues[i]))}mm", in_layout=True, ha='center', c='#106BA3')
+        axs[current].set_ylim([min(tempValues) - 1.2,
+                        max(tempValues) + 1.2])
+        axs[current].set_xlim(tempDates[0], tempDates[-1])
+        axs[current].grid(which='major',)
+        current += 1
 
-    x, y = zip(*sorted(sunhours.items()))
-    sunDates = np.array(date2num(x))
-    sunValues = np.array(y) / 60
-    axs[2].bar(sunDates, sunValues, color='#D9822B')
-    axs[2].title.set_text('Sunshine (hours/day)')
-    axs[2].set_xlim(sunDates[0] - 0.5, sunDates[-1] + 0.5)
-    axs[2].set_ylim([0, max([8, max(sunValues) + 0.5])])
-    axs[2].grid(axis='y')
-    for i in range(len(sunValues)):
-        if sunValues[i] > 0:
-            axs[2].text(sunDates[i], sunValues[i] + 0.2,
-                        f"{int(np.round(sunValues[i]))}h", in_layout=True, ha='center', c='#D9822B')
+    if len(rainfall) > 0:
+        x, y = zip(*sorted(rainfall.items()))
+        rainDates = np.array(date2num(x))
+        rainValues = np.array(y)
+        axs[current].bar(rainDates, rainValues, color='#106BA3')
+        axs[current].title.set_text('Precipitation (mm/day)')
+        axs[current].set_xlim(rainDates[0] - 0.5, rainDates[-1] + 0.5)
+        axs[current].set_ylim([0, max([8, max(rainValues) + 1])])
+        axs[current].grid(axis='y')
+        for i in range(len(rainValues)):
+            if rainValues[i] > 0:
+                axs[current].text(rainDates[i], rainValues[i] + 0.2,
+                            f"{int(np.round(rainValues[i]))}mm", in_layout=True, ha='center', c='#106BA3')
+        current += 1
 
-    for ax in axs[:3]:
+    if len(sunhours) > 0:
+        x, y = zip(*sorted(sunhours.items()))
+        sunDates = np.array(date2num(x))
+        sunValues = np.array(y) / 60
+        axs[current].bar(sunDates, sunValues, color='#D9822B')
+        axs[current].title.set_text('Sunshine (hours/day)')
+        axs[current].set_xlim(sunDates[0] - 0.5, sunDates[-1] + 0.5)
+        axs[current].set_ylim([0, max([8, max(sunValues) + 0.5])])
+        axs[current].grid(axis='y')
+        for i in range(len(sunValues)):
+            if sunValues[i] > 0:
+                axs[current].text(sunDates[i], sunValues[i] + 0.2,
+                                  f"{int(np.round(sunValues[i]))}h", in_layout=True, ha='center', c='#D9822B')
+        current += 1
+
+    for ax in axs[:current]:
         ax.xaxis_date()
         ax.xaxis.set_major_formatter(DateFormatter('%a %d.%m.'))
         ax.xaxis.set_major_locator(DayLocator())
@@ -117,90 +129,99 @@ def plotDetailed(forecast: Any):
         rainfall[dateWithTime] = rainfall.get(dateWithTime, 0) + element['precipitation']
         sunhours[dateWithTime] = sunhours.get(dateWithTime, 0) + element['sunshine']
 
-    plot_count = 3
-    fig, axs = plt.subplots(plot_count, 1, figsize=(14, 5 * plot_count))
+    plot_count = (len(temps) > 0) + (len(rainfall) > 0) + (len(sunhours) > 0)
+    _, axs = plt.subplots(plot_count, 1, figsize=(14, 5 * plot_count))
     axs = cast(List[Axes], axs)
 
-    x, y = zip(*sorted(temps.items()))
-    tempDates = np.array(date2num(x))
-    tempValues = np.array(y)
+    current = 0
 
-    axs[0].scatter(tempDates, tempValues, c=tempValues)
-    axs[0].title.set_text('Temperature (°C)')
-    axs[0].set_ylim([min(tempValues) - 1.2, max(tempValues) + 1.2])
-    axs[0].set_xlim(tempDates[0], tempDates[-1])
+    if len(temps) > 0:
+        x, y = zip(*sorted(temps.items()))
+        tempDates = np.array(date2num(x))
+        tempValues = np.array(y)
 
-    x, y = zip(*sorted(rainfall.items()))
-    rainDates = np.array(date2num(x))
-    rainValues = np.array(y)
-    axs[1].bar(rainDates, rainValues, color='#106BA3')
-    axs[1].title.set_text('Precipitation (mm/hour)')
-    axs[1].set_xlim(rainDates[0], rainDates[-1])
-    axs[1].set_ylim([0, max([2, max(rainValues) + 1])])
+        axs[current].scatter(tempDates, tempValues, c=tempValues)
+        axs[current].title.set_text('Temperature (°C)')
+        axs[current].set_ylim([min(tempValues) - 1.2, max(tempValues) + 1.2])
+        axs[current].set_xlim(tempDates[0], tempDates[-1])
+        current += 1
 
-    x, y = zip(*sorted(sunhours.items()))
-    sunDates = np.array(date2num(x))
-    sunValues = np.array(y)
-    axs[2].bar(sunDates, sunValues, color='#D9822B')
-    axs[2].title.set_text('Sunshine (min/hour)')
-    axs[2].set_xlim(sunDates[0], sunDates[-1])
-    axs[2].set_ylim([0, 65])
-    axs[2].plot(sunDates, np.full((len(sunDates)), 60), color='black')
+    if len(rainfall) > 0:
+        x, y = zip(*sorted(rainfall.items()))
+        rainDates = np.array(date2num(x))
+        rainValues = np.array(y)
+        axs[current].bar(rainDates, rainValues, color='#106BA3')
+        axs[current].title.set_text('Precipitation (mm/hour)')
+        axs[current].set_xlim(rainDates[0], rainDates[-1])
+        axs[current].set_ylim([0, max([2, max(rainValues) + 1])])
+        current += 1
 
-    for ax in axs[:3]:
+    if len(sunhours) > 0:
+        x, y = zip(*sorted(sunhours.items()))
+        sunDates = np.array(date2num(x))
+        sunValues = np.array(y)
+        axs[current].bar(sunDates, sunValues, color='#D9822B')
+        axs[current].title.set_text('Sunshine (min/hour)')
+        axs[current].set_xlim(sunDates[0], sunDates[-1])
+        axs[current].set_ylim([0, 65])
+        axs[current].plot(sunDates, np.full((len(sunDates)), 60), color='black')
+        current += 1
+
+    for ax in axs[:current]:
         ax.xaxis_date()
         ax.grid(which='major')
         ax.xaxis.set_major_formatter(DateFormatter('%a %H:00'))
         ax.xaxis.set_major_locator(HourLocator(interval=4))
 
 
-def fetchAndPlot(lat: float, lon: float, duration: float, debug: bool = False, jpeg: bool = False) -> WeatherResult:
+def fetchAndPlot(lat: float, lon: float, duration: float, debug: bool = False) -> Optional[WeatherResult]:
     if (duration > 10):
         duration = 10
     today = datetime.now().isoformat()
     lastday = (datetime.now() + timedelta(days=duration)).isoformat()
     forecast = {}
-    t1 = time.perf_counter()
-    with urllib.request.urlopen(f"https://api.brightsky.dev/weather?lat={lat}&lon={lon}&date={today}&last_date={lastday}") as url:
-        text = url.read().decode()
-        t2 = time.perf_counter()
-        forecast = json.loads(text)
-        # print(f"fetch: {(t2 - t1) * 1000}ms")
+    try:
+        with urllib.request.urlopen(f"https://api.brightsky.dev/weather?lat={lat}&lon={lon}&date={today}&last_date={lastday}") as url:
+            text = url.read().decode()
+            forecast = json.loads(text)
+    except:
+        logging.log(msg=f"Couldn't fetch {lat}, {lon}", level=logging.ERROR)
+        return None
+
     weather_station = forecast['sources'][0]['station_name']
     weather_station_distance = forecast['sources'][0]['distance']
 
-    t1 = time.perf_counter()
     if duration > 2:
         plotOverview(forecast)
     else:
         plotDetailed(forecast)
-    t2 = time.perf_counter()
-    # print(f"plot: {(t2 - t1) * 1000}ms")
-
-    # temp_name = tempfile.gettempdir() + '/' + next(
-    #     tempfile._get_candidate_names()  # type: ignore
-    # ) + ('.jpeg' if jpeg else '.png')
     outbuffer = io.BytesIO()
-    t1 = time.perf_counter()
     if debug:
         plt.show()
     else:
-        plt.savefig(outbuffer, format='jpeg' if jpeg else 'png', bbox_inches='tight')
+        plt.savefig(outbuffer, format='jpeg', bbox_inches='tight')
         outbuffer.seek(0)
-    t2 = time.perf_counter()
-    # print(f"savefig: {(t2 - t1) * 1000}ms")
-
-    current = []
-    with urllib.request.urlopen(f"https://api.brightsky.dev/current_weather?lat={lat}&lon={lon}") as url:
-        current = json.loads(url.read().decode())
-    return {
-        'plot': outbuffer,
-        'duration': duration,
-        'current_temp': current['weather']['temperature'],
-        'current_str': current['weather']['condition'],
-        'weather_station': weather_station.title(),
-        'weather_station_distance': int(weather_station_distance / 100) / 10,
-    }
+    try:
+        current = []
+        with urllib.request.urlopen(f"https://api.brightsky.dev/current_weather?lat={lat}&lon={lon}") as url:
+            current = json.loads(url.read().decode())
+        return {
+            'plot': outbuffer,
+            'duration': duration,
+            'current_temp': current['weather']['temperature'],
+            'current_str': current['weather']['condition'],
+            'weather_station': weather_station.title(),
+            'weather_station_distance': int(weather_station_distance / 100) / 10,
+        }
+    except:
+        return {
+            'plot': outbuffer,
+            'duration': duration,
+            'current_temp': math.nan,
+            'current_str': 'Unknown',
+            'weather_station': weather_station.title(),
+            'weather_station_distance': int(weather_station_distance / 100) / 10,
+        }
 
 
 def getLocationInfo(lat: float, lon: float) -> Tuple[str, float]:
@@ -214,24 +235,16 @@ def debugTest():
     with urllib.request.urlopen(f"https://nominatim.openstreetmap.org/search?q=Berlin&addressdetails=1&format=jsonv2") as url:
         locationResults = json.loads(url.read().decode())
     t2 = time.perf_counter()
-    logging.log(msg=f"osm: {(t2 - t1) * 1000}ms", level=20)
 
     for locationResult in locationResults[:1]:
-        t1 = time.perf_counter()
-        imageResult = fetchAndPlot(locationResult['lat'], locationResult['lon'], 60*60, jpeg=True)
-        t2 = time.perf_counter()
-        logging.log(msg=f"plot: {(t2 - t1) * 1000}ms", level=20)
 
-        t1 = time.perf_counter()
+        imageResult = fetchAndPlot(locationResult['lat'], locationResult['lon'], 60*60, jpeg=True)
+
         url = "http://image-host/image"
         payload = {'image': imageResult['plot'].read()}
         uploadResponse = requests.request("POST", url, files=payload)
-        logging.log(msg=f"upload response: {uploadResponse.text}", level=20)
         uploadJson = json.loads(uploadResponse.text)
-        t2 = time.perf_counter()
-        logging.log(msg=f"upload: {(t2 - t1) * 1000}ms", level=20)
         link = uploadJson['link']
-        logging.log(msg=link, level=20)
 
 if __name__ == "__main__":
     debugTest()

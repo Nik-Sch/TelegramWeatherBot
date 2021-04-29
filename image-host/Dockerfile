@@ -7,4 +7,4 @@ RUN python -m pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-CMD [ "gunicorn", "--worker-class=gevent", "--graceful-timeout", "10", "-t", "9999", "-b", "0.0.0.0:80", "--worker-tmp-dir", "/dev/shm", "--access-logfile", "-", "--reload",  "main:app" ]
+CMD [ "gunicorn", "main:app" ]
