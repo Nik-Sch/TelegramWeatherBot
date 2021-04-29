@@ -71,8 +71,8 @@ def start(update: Update, context: CallbackContext):
 
 
 @functools.lru_cache(maxsize=100, typed=False)
-def getImage(lat: float, lon: float, detailed: bool) -> Optional[ImageResult]:
-    imageResult = fetchAndPlot(lat, lon, 10 if detailed else 1.5)
+def getImage(lat: float, lon: float, tenDays: bool) -> Optional[ImageResult]:
+    imageResult = fetchAndPlot(lat, lon, 10 if tenDays else 1.5)
     if imageResult == None:
         return None
 
@@ -140,6 +140,7 @@ def addLocation(chat_id: str, bot: Bot, lat: float, lon: float):
     }):
         bot.send_message(
             chat_id, f"Station '{name}' ({dist}km from location) added.\nIt will be included in '/getall' and you can get it individually by '/get {name}'.")
+        sendForecast(chat_id, bot, lat, lon, True)
     else:
         bot.send_message(chat_id, f"Station '{name}' is already added.")
 
@@ -190,7 +191,7 @@ def getWrapper(update: Update, context: CallbackContext, detailed: bool):
         context.bot.send_message(
             chat_id, text=f"You have not added {context.args[0]}.\n You have added {', '.join(locationNames)}.")
         return
-    location = next(filter(lambda x: x['name'] == context.args[0], locations))
+    location = next(filter(lambda x: x['name'] == context.args[0], locations), None)
     sendForecast(chat_id, context.bot,
                  location['lat'], location['lon'], detailed, name=location['name'])
 
@@ -226,15 +227,22 @@ def handleText(update: Update, context: CallbackContext):
     db.setState(chat_id, {'type': 'idle'})
 
     if state['type'] == 'get' or state['type'] == 'getDetailed':  # type: ignore
-        locations = db.getLocations(chat_id)
-        location = next(
-            filter(lambda x: x['name'] == message.text, locations), None)
-        if location != None:
-            sendForecast(chat_id, context.bot,
-                         location['lat'], location['lon'], name=location['name'], detailed=state['type'] == 'get')  # type: ignore
+        if 'addLocations' in state:
+            selectedLocation = next(filter(lambda l: l['name'] == message.text, state['addLocations']), None)
+            if selectedLocation != None:
+                sendForecast(chat_id, context.bot, selectedLocation['lat'], selectedLocation['lon'], True)
+            else:
+                context.bot.send_message(chat_id, text="Invalid location selected.", reply_markup=ReplyKeyboardRemove())
+            db.setState(chat_id, {'type': 'idle'})
         else:
-            context.bot.send_message(
-                chat_id, text="Invalid station name.", reply_markup=ReplyKeyboardRemove())
+            locations = db.getLocations(chat_id)
+            location = next(filter(lambda x: x['name'] == message.text, locations), None)
+            if location != None:
+                sendForecast(chat_id, context.bot,
+                            location['lat'], location['lon'], name=location['name'], detailed=state['type'] == 'get')  # type: ignore
+            else:
+                context.bot.send_message(
+                    chat_id, text="Invalid station name.", reply_markup=ReplyKeyboardRemove())
 
     elif state['type'] == 'rename':  # type: ignore
         locations = db.getLocations(chat_id)
@@ -262,7 +270,7 @@ def handleText(update: Update, context: CallbackContext):
                 chat_id, text="Invalid station name.", reply_markup=ReplyKeyboardRemove())
     elif state['type'] == 'add':  # type: ignore
         if 'addLocations' in state:
-            selectedLocation = next(filter(lambda l: l['name'] == message.text, state['addLocations']))
+            selectedLocation = next(filter(lambda l: l['name'] == message.text, state['addLocations']), None)
             if selectedLocation != None:
                 addLocation(chat_id, context.bot, selectedLocation['lat'], selectedLocation['lon'])
             else:
@@ -270,13 +278,34 @@ def handleText(update: Update, context: CallbackContext):
             db.setState(chat_id, {'type': 'idle'})
         else:
             addLocations = queryLocations(message.text)
+            if len(addLocations) > 0:
+                db.setState(chat_id, {
+                    'type': 'add',
+                    'addLocations': addLocations
+                })
+                context.bot.send_message(chat_id,
+                                        text="I have found these locations matching. Choose one:",
+                                         reply_markup=locationReplyKeyboard(addLocations))
+            else:
+                context.bot.send_message(chat_id,
+                                        text="I couldn't find a location.",
+                                        reply_markup=ReplyKeyboardRemove())
+    elif state['type'] == 'idle' and message.chat.type == 'private':  # type: ignore
+        addLocations = queryLocations(message.text)
+        if len(addLocations) > 0:
             db.setState(chat_id, {
-                'type': 'add',
+                'type': 'get',
                 'addLocations': addLocations
             })
             context.bot.send_message(chat_id,
                                     text="I have found these locations matching. Choose one:",
                                     reply_markup=locationReplyKeyboard(addLocations))
+        else:
+            context.bot.send_message(chat_id,
+                                     text="I couldn't find a location.",
+                                     reply_markup=ReplyKeyboardRemove())
+
+
 
 
 def rename(update: Update, context: CallbackContext):
