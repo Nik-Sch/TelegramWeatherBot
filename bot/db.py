@@ -10,7 +10,7 @@ class Location(TypedDict):
     name: str
 
 class State(TypedDict, total=False):
-    type: Literal['idle', 'get', 'getDetailed', 'add', 'rename']
+    type: Literal['idle', 'get', 'getDetailed', 'add', 'rename', 'remove']
     location: Location # NotRequired[Location] doesn't work...
     addLocations: List[Location] # NotRequired[Location] doesn't work...
 
@@ -32,6 +32,13 @@ class Backend():
           return False
         self.db.locations.insert_one({'chat': chat_id, 'location': location})
         return True
+
+    def removeLocation(self, chat_id: str, location: Location):
+        self.db.locations.delete_one({
+            'chat': chat_id,
+            'location.lat': location['lat'],
+            'location.lon': location['lon']
+        })
 
     def getLocations(self, chat_id: str) -> Iterator[Location]:
         cursor = self.db.locations.find({'chat': chat_id})

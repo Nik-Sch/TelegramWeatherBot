@@ -69,7 +69,7 @@ class UploadResult(TypedDict):
 
 
 def start(update: Update, context: CallbackContext):
-    context.bot.send_message(chat_id=update.effective_chat.id, text="Send me locations and I will answer with the weather.")
+    context.bot.send_message(chat_id=update.effective_chat.id, text="Send me locations and I will answer with the weather.\nOr you can /add your favorite weather stations for quick weather access.\n\nYou can also mention me with @weatherstuffbot and send weather reports to any chat you like.")
 
 
 @functools.lru_cache(maxsize=100, typed=False)
@@ -141,7 +141,7 @@ def addLocation(chat_id: str, bot: Bot, lat: float, lon: float):
         'lon': lon
     }):
         bot.send_message(
-            chat_id, f"Station '{name}' ({dist}km from location) added.\nIt will be included in '/getall' and you can get it individually by '/get {name}'.")
+            chat_id, f"Station '{name}' ({dist}km from location) added.\nIt will be included in /getall and you can get it individually by '/get {name}'.")
         sendForecast(chat_id, bot, lat, lon, True)
     else:
         bot.send_message(chat_id, f"Station '{name}' is already added.")
@@ -152,7 +152,7 @@ def getAll(update: Update, context: CallbackContext):
     locations = list(db.getLocations(chat_id))
     if len(locations) == 0:
         context.bot.send_message(
-            chat_id, text=f"You need to add a location with '/add'.")
+            chat_id, text=f"You need to add a location with /add.")
         return
 
     for location in locations:
@@ -179,7 +179,7 @@ def getWrapper(update: Update, context: CallbackContext, detailed: bool):
     locations = list(db.getLocations(chat_id))
     if len(locations) == 0:
         context.bot.send_message(
-            chat_id, text=f"You need to add a location with '/add'.")
+            chat_id, text=f"You need to add a location with /add.")
         return
 
     locationNames = list(map(lambda x: x['name'], locations))
@@ -204,6 +204,20 @@ def get(update: Update, context: CallbackContext):
 
 def getDetailed(update: Update, context: CallbackContext):
     getWrapper(update, context, True)
+
+
+def delete(update: Update, context: CallbackContext):
+    chat_id, message = getStuff(update)
+    locations = list(db.getLocations(chat_id))
+    if len(locations) == 0:
+        context.bot.send_message(
+            chat_id, text=f"You need to add a location with /add.")
+        return
+    db.setState(chat_id, {'type': 'remove'})
+    message.reply_text(
+        'Which station should be removed?', reply_markup=locationReplyKeyboard(locations))
+    return
+
 
 
 def handleLocation(update: Update, context: CallbackContext):
@@ -270,6 +284,18 @@ def handleText(update: Update, context: CallbackContext):
         else:
             context.bot.send_message(
                 chat_id, text="Invalid station name.", reply_markup=ReplyKeyboardRemove())
+
+    elif state['type'] == 'remove':  # type: ignore
+        locations = db.getLocations(chat_id)
+        location = next(filter(lambda x: x['name'] == message.text, locations), None)
+        if location != None:
+            db.removeLocation(chat_id, location)
+            context.bot.send_message(
+                chat_id, text=f"{location['name']} successfully removed.", reply_markup=ReplyKeyboardRemove())
+        else:
+            context.bot.send_message(
+                chat_id, text="Invalid station name.", reply_markup=ReplyKeyboardRemove())
+
     elif state['type'] == 'add':  # type: ignore
         if 'addLocations' in state:
             selectedLocation = next(filter(lambda l: l['name'] == message.text, state['addLocations']), None)
@@ -317,7 +343,7 @@ def rename(update: Update, context: CallbackContext):
     locations = list(db.getLocations(chat_id))
     if len(locations) == 0:
         context.bot.send_message(
-            chat_id, text=f"You need to add a location with '/add'.")
+            chat_id, text=f"You need to add a location with /add.")
         return
 
     message.reply_text(
@@ -392,6 +418,12 @@ def handleInlineQuery(update: Update, context: CallbackContext):
     context.bot.answer_inline_query(queryId, results=answers, cache_time=CACHING_TIME, next_offset=str(nextOffset))
 
 
+def handleError(update: Update, context: CallbackContext):
+    try:
+        context.bot.send_message(update.effective_chat.id, text="Uh oh, something went wrong.\nIf you like you can tell @NikSch.")
+    except:
+        pass
+
 updater = Updater(token=os.environ.get('BOT_TOKEN'))
 dispatcher = updater.dispatcher
 
@@ -403,9 +435,12 @@ dispatcher.add_handler(CommandHandler('getAll', getAll))
 dispatcher.add_handler(CommandHandler('get', get))
 dispatcher.add_handler(CommandHandler('getDetailed', getDetailed))
 dispatcher.add_handler(CommandHandler('rename', rename))
+dispatcher.add_handler(CommandHandler('delete', delete))
+dispatcher.add_handler(CommandHandler('remove', delete))
 dispatcher.add_handler(MessageHandler(Filters.location, handleLocation))
 dispatcher.add_handler(MessageHandler(Filters.text, handleText))
 dispatcher.add_handler(InlineQueryHandler(handleInlineQuery))
+dispatcher.add_error_handler(handleError)
 
 clearCache()
 
