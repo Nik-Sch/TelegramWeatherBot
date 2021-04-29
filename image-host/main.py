@@ -1,17 +1,17 @@
+from datetime import datetime, timedelta
 import logging
 import os
+from pathlib import Path
 from typing import Any
 from flask import Flask, request, jsonify
 from flask.helpers import make_response, send_from_directory
 from flask.wrappers import Response
 import hashlib
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image
 import socket
-import time
 import gevent
 
 app = Flask(__name__)
-
 
 @app.errorhandler(404)
 def e404(_):
@@ -78,6 +78,25 @@ def post() -> Response:
 def get(file: str) -> Response:
     return send_from_directory('/data', file)
 
+
+def deleteOldImages():
+    while True:
+        logging.log(msg="deleting old images", level=30)
+
+        for item in Path('/data/').glob('*.jpg'):
+            try:
+                if item.is_file():
+                    itemTime = datetime.fromtimestamp(item.stat().st_mtime)
+                    if itemTime < datetime.now() - timedelta(days=2):
+                        os.remove(item)
+                        logging.log(msg=f"deleted {item}", level=20)
+            except:
+                pass
+        gevent.sleep(60 * 60)
+
+@app.before_first_request
+def startClear():
+    gevent.spawn(deleteOldImages)
 
 if __name__ == '__main__':
     app.run(debug=True, port=80, host='0.0.0.0')

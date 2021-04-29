@@ -36,6 +36,8 @@ from weatherProvider import debugTest, fetchAndPlot, getLocationInfo
 import threading
 import functools
 
+CACHING_TIME = 5 * 60
+
 db = Backend()
 
 
@@ -99,7 +101,7 @@ def clearCache():
     logging.log(msg=getImage.cache_info(), level=20)
     logging.log(msg="clearing cache", level=20)
     getImage.cache_clear()
-    threading.Timer(60 * 30, clearCache).start()
+    threading.Timer(CACHING_TIME, clearCache).start()
 
 
 def sendForecast(chat_id: Union[int, str], bot: Bot, lat: float, lon: float, detailed: bool, name: str = None):
@@ -387,7 +389,7 @@ def handleInlineQuery(update: Update, context: CallbackContext):
         logging.log(msg=f"{queryId} ({query}): finished ({len(locationResults)})", level=20)
         if queryId in currentQueryResult:
             del currentQueryResult[queryId]
-    context.bot.answer_inline_query(queryId, results=answers, cache_time=60 * 30, next_offset=str(nextOffset))
+    context.bot.answer_inline_query(queryId, results=answers, cache_time=CACHING_TIME, next_offset=str(nextOffset))
 
 
 updater = Updater(token=os.environ.get('BOT_TOKEN'))
