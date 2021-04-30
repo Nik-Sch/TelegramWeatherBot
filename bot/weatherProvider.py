@@ -230,21 +230,13 @@ def getLocationInfo(lat: float, lon: float) -> Tuple[str, float]:
         return (source['station_name'].title(), int(source['distance'] / 100) / 10)
 
 def debugTest():
-    locationResults = {}
+    forecast = {}
+    with open('exampleWeather.json') as f:
+        forecast = json.load(f)
     t1 = time.perf_counter()
-    with urllib.request.urlopen(f"https://nominatim.openstreetmap.org/search?q=Berlin&addressdetails=1&format=jsonv2") as url:
-        locationResults = json.loads(url.read().decode())
+    plotOverview(forecast)
     t2 = time.perf_counter()
-
-    for locationResult in locationResults[:1]:
-
-        imageResult = fetchAndPlot(locationResult['lat'], locationResult['lon'], 60*60, jpeg=True)
-
-        url = "http://image-host/image"
-        payload = {'image': imageResult['plot'].read()}
-        uploadResponse = requests.request("POST", url, files=payload)
-        uploadJson = json.loads(uploadResponse.text)
-        link = uploadJson['link']
+    print(f"plot: {(t2 - t1) * 1000}ms")
 
 if __name__ == "__main__":
     debugTest()
