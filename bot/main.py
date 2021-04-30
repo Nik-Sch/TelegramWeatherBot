@@ -8,7 +8,6 @@ from telegram.ext import (Updater,
                           )
 from telegram import (Bot,
                       ReplyKeyboardMarkup,
-                      KeyboardButton,
                       Update,
                       ReplyKeyboardRemove,
                       InlineQueryResult
@@ -16,25 +15,24 @@ from telegram import (Bot,
 import os
 import logging
 import json
-from typing import (Any, Literal, Optional, Union,
+from typing import (Any, Dict, Literal, Optional, Union,
                     List,
                     Tuple,
                     TypedDict,
                     cast
                     )
-from enum import Enum
 from telegram.inline.inlinequeryresultphoto import InlineQueryResultPhoto
-from telegram.inline.inlinequeryresultarticle import InlineQueryResultArticle
-from telegram.inline.inputtextmessagecontent import InputTextMessageContent
-
 from telegram.message import Message
 import urllib.parse
 import urllib.request
 import requests
 from db import Backend, Location
-from weatherProvider import debugTest, fetchAndPlot, getLocationInfo
+from weatherProvider import fetchAndPlot, getLocationInfo
 import threading
 import functools
+from threading import Thread
+from queue import Queue
+from time import sleep
 
 CACHING_TIME = 5 * 60
 
@@ -69,7 +67,8 @@ class UploadResult(TypedDict):
 
 
 def start(update: Update, context: CallbackContext):
-    context.bot.send_message(chat_id=update.effective_chat.id, text="Send me locations and I will answer with the weather.\nOr you can /add your favorite weather stations for quick weather access.\n\nYou can also mention me with @weatherstuffbot and send weather reports to any chat you like.")
+    context.bot.send_message(chat_id=update.effective_chat.id,
+                             text="Send me locations and I will answer with the weather.\nOr you can /add your favorite weather stations for quick weather access.\n\nYou can also mention me with @weatherstuffbot and send weather reports to any chat you like.")
 
 
 @functools.lru_cache(maxsize=100, typed=False)
@@ -219,7 +218,6 @@ def delete(update: Update, context: CallbackContext):
     return
 
 
-
 def handleLocation(update: Update, context: CallbackContext):
     chat_id, message = getStuff(update)
     lat = message.location.latitude
@@ -255,7 +253,7 @@ def handleText(update: Update, context: CallbackContext):
             location = next(filter(lambda x: x['name'] == message.text, locations), None)
             if location != None:
                 sendForecast(chat_id, context.bot,
-                            location['lat'], location['lon'], name=location['name'], detailed=state['type'] == 'get')  # type: ignore
+                             location['lat'], location['lon'], name=location['name'], detailed=state['type'] == 'get')  # type: ignore
             else:
                 context.bot.send_message(
                     chat_id, text="Invalid station name.", reply_markup=ReplyKeyboardRemove())
@@ -312,12 +310,12 @@ def handleText(update: Update, context: CallbackContext):
                     'addLocations': addLocations
                 })
                 context.bot.send_message(chat_id,
-                                        text="I have found these locations matching. Choose one:",
+                                         text="I have found these locations matching. Choose one:",
                                          reply_markup=locationReplyKeyboard(addLocations))
             else:
                 context.bot.send_message(chat_id,
-                                        text="I couldn't find a location.",
-                                        reply_markup=ReplyKeyboardRemove())
+                                         text="I couldn't find a location.",
+                                         reply_markup=ReplyKeyboardRemove())
     elif state['type'] == 'idle' and message.chat.type == 'private':  # type: ignore
         addLocations = queryLocations(message.text)
         if len(addLocations) > 0:
@@ -326,14 +324,12 @@ def handleText(update: Update, context: CallbackContext):
                 'addLocations': addLocations
             })
             context.bot.send_message(chat_id,
-                                    text="I have found these locations matching. Choose one:",
-                                    reply_markup=locationReplyKeyboard(addLocations))
+                                     text="I have found these locations matching. Choose one:",
+                                     reply_markup=locationReplyKeyboard(addLocations))
         else:
             context.bot.send_message(chat_id,
                                      text="I couldn't find a location.",
                                      reply_markup=ReplyKeyboardRemove())
-
-
 
 
 def rename(update: Update, context: CallbackContext):
@@ -363,36 +359,17 @@ def queryLocations(query: str) -> List[Location]:
         return list(map(osmToLocation, json.loads(url.read().decode())))
 
 
-currentQueryResult = {}
 
+inlineQueues: Dict[str, "Queue[Optional[InlineQueryResult]]"] = {}
 
-def handleInlineQuery(update: Update, context: CallbackContext):
-    query = update.inline_query.query
-    queryId = update.inline_query.id
-    currentOffset = update.inline_query.offset
-    if currentOffset == 'None':
-        return
-    try:
-        currentOffset = int(currentOffset)
-    except:
-        currentOffset = 0
-    logging.log(msg=f"{queryId} ({query}): current offset: {currentOffset}", level=20)
-
-    locationResults = {}
-    if queryId in currentQueryResult:
-        logging.log(msg=f"{queryId} ({query}): using cache", level=20)
-        locationResults = currentQueryResult[queryId]
-    else:
-        locationResults = queryLocations(query)
-        currentQueryResult[queryId] = locationResults
-
-    answers: List[InlineQueryResult] = []
-
-    while len(answers) == 0 and len(locationResults) > currentOffset:
-        imageResult = getImage(locationResults[currentOffset]['lat'], locationResults[currentOffset]['lon'], True)
+def provideImagesForQuery(query: str, queryId: str):
+    locations = queryLocations(query)
+    for location in locations:
+        imageResult = getImage(location['lat'], location['lon'], True)
         if imageResult != None:
+            logging.info(f"queueing {imageResult['imageId']}.")
             text = f"Weather for station {imageResult['weather_station']}. Searched for '{query}'."
-            answers.append(
+            inlineQueues[queryId].put(
                 InlineQueryResultPhoto(
                     id=imageResult['imageId'],
                     photo_url=imageResult['imageLink'],
@@ -404,18 +381,41 @@ def handleInlineQuery(update: Update, context: CallbackContext):
                     title=imageResult['weather_station'],
                 )
             )
-        else:
-            currentOffset += 1
+    logging.info('queuing None, finished.')
+    inlineQueues[queryId].put(None)
+    sleep(5)
+    logging.info(f"deleting queue {queryId}")
+    del inlineQueues[queryId]
 
-    nextOffset = None
-    if len(locationResults) > currentOffset + 1:
-        logging.log(msg=f"{queryId} ({query}): requesting: {currentOffset + 1}/{len(locationResults)}", level=20)
-        nextOffset = currentOffset + 1
+
+def handleInlineQuery(update: Update, context: CallbackContext):
+    query: str = update.inline_query.query
+    queryId: str = update.inline_query.id
+    offset: str = update.inline_query.offset
+    firstQueryId: str = ''
+    counter: str = '0'
+    logging.info(f"offset: {offset}")
+    if offset == '':
+        # first call for current query
+        logging.info(f"creating queue {queryId}")
+        firstQueryId = queryId
+        inlineQueues[firstQueryId] = Queue()
+        thread = Thread(target=provideImagesForQuery, args=(query, firstQueryId))
+        thread.start()
     else:
-        logging.log(msg=f"{queryId} ({query}): finished ({len(locationResults)})", level=20)
-        if queryId in currentQueryResult:
-            del currentQueryResult[queryId]
-    context.bot.answer_inline_query(queryId, results=answers, cache_time=CACHING_TIME, next_offset=str(nextOffset))
+        firstQueryId, counter = offset.split('-')
+
+
+    answers: List[InlineQueryResult] = []
+
+    if firstQueryId in inlineQueues:
+        nextItem = inlineQueues[firstQueryId].get()
+        if nextItem != None:
+            logging.info(f"got {nextItem.id}")
+            answers.append(nextItem)
+
+    logging.info(f"sending {len(answers)} items, counter = {counter}")
+    context.bot.answer_inline_query(queryId, results=answers, cache_time=CACHING_TIME, next_offset=f"{firstQueryId}-{int(counter) + 1}")
 
 
 def handleError(update: Update, context: CallbackContext):
@@ -423,6 +423,7 @@ def handleError(update: Update, context: CallbackContext):
         context.bot.send_message(update.effective_chat.id, text="Uh oh, something went wrong.\nIf you like you can tell @NikSch.")
     except:
         pass
+
 
 updater = Updater(token=os.environ.get('BOT_TOKEN'))
 dispatcher = updater.dispatcher
