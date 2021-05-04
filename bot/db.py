@@ -10,7 +10,7 @@ class Location(TypedDict):
     name: str
 
 class State(TypedDict, total=False):
-    type: Literal['idle', 'get', 'getDetailed', 'add', 'rename', 'remove']
+    type: Literal['idle', 'get', 'getTenDays', 'add', 'rename', 'remove']
     location: Location # NotRequired[Location] doesn't work...
     addLocations: List[Location] # NotRequired[Location] doesn't work...
 

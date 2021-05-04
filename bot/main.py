@@ -103,10 +103,10 @@ def clearCache():
     threading.Timer(CACHING_TIME, clearCache).start()
 
 
-def sendForecast(chat_id: Union[int, str], bot: Bot, lat: float, lon: float, detailed: bool, name: str = None):
+def sendForecast(chat_id: Union[int, str], bot: Bot, lat: float, lon: float, tenDays: bool, name: str = None):
     waitingMessage = bot.send_message(chat_id, text="⏳")
     try:
-        result = getImage(lat, lon, detailed)
+        result = getImage(lat, lon, tenDays)
         if result == None:
             bot.send_message(chat_id, text="The location has no weather data.")
             return
@@ -117,8 +117,10 @@ def sendForecast(chat_id: Union[int, str], bot: Bot, lat: float, lon: float, det
                        photo=result['imageLink'],
                        caption=f"{result['duration']} day {station_text}\nCurrently it is {result['current_temp']}°C and {result['current_str']}.",
                        reply_markup=ReplyKeyboardRemove())
-    except:
+    except Exception as e:
         bot.send_message(chat_id, text="Uh oh, an error occured.")
+        logging.exception("Stuff")
+        raise
     finally:
         bot.delete_message(chat_id=chat_id, message_id=waitingMessage.message_id)
 
@@ -173,7 +175,7 @@ def locationReplyKeyboard(locations: List[Location]) -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=True)
 
 
-def getWrapper(update: Update, context: CallbackContext, detailed: bool):
+def getWrapper(update: Update, context: CallbackContext, tenDays: bool):
     chat_id, message = getStuff(update)
     locations = list(db.getLocations(chat_id))
     if len(locations) == 0:
@@ -183,7 +185,7 @@ def getWrapper(update: Update, context: CallbackContext, detailed: bool):
 
     locationNames = list(map(lambda x: x['name'], locations))
     if context.args != None and len(context.args) == 0:
-        db.setState(chat_id, {'type': 'getDetailed' if detailed else 'get'})
+        db.setState(chat_id, {'type': 'getTenDays' if tenDays else 'get'})
         message.reply_text(
             'Choose a station.', reply_markup=locationReplyKeyboard(locations))
         return
@@ -194,15 +196,15 @@ def getWrapper(update: Update, context: CallbackContext, detailed: bool):
         return
     location = next(filter(lambda x: x['name'] == context.args[0], locations), None)
     sendForecast(chat_id, context.bot,
-                 location['lat'], location['lon'], detailed, name=location['name'])
+                 location['lat'], location['lon'], tenDays=tenDays, name=location['name'])
 
 
 def get(update: Update, context: CallbackContext):
-    getWrapper(update, context, False)
+    getWrapper(update, context, True)
 
 
 def getDetailed(update: Update, context: CallbackContext):
-    getWrapper(update, context, True)
+    getWrapper(update, context, False)
 
 
 def delete(update: Update, context: CallbackContext):
@@ -240,7 +242,7 @@ def handleText(update: Update, context: CallbackContext):
     state = db.getState(chat_id)
     db.setState(chat_id, {'type': 'idle'})
 
-    if state['type'] == 'get' or state['type'] == 'getDetailed':  # type: ignore
+    if state['type'] == 'get' or state['type'] == 'getTenDays':  # type: ignore
         if 'addLocations' in state:
             selectedLocation = next(filter(lambda l: l['name'] == message.text, state['addLocations']), None)
             if selectedLocation != None:
@@ -253,7 +255,7 @@ def handleText(update: Update, context: CallbackContext):
             location = next(filter(lambda x: x['name'] == message.text, locations), None)
             if location != None:
                 sendForecast(chat_id, context.bot,
-                             location['lat'], location['lon'], name=location['name'], detailed=state['type'] == 'get')  # type: ignore
+                             location['lat'], location['lon'], name=location['name'], tenDays=state['type'] == 'getTenDays')  # type: ignore
             else:
                 context.bot.send_message(
                     chat_id, text="Invalid station name.", reply_markup=ReplyKeyboardRemove())

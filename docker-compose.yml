@@ -11,6 +11,7 @@ services:
       env.env
     networks:
       - weatherbot
+      - brightsky_api
 
   image-host:
     build: image-host
@@ -37,4 +38,6 @@ networks:
   weatherbot:
     driver: bridge
   system-proxy_default:
+    external: true
+  brightsky_api:
     external: true

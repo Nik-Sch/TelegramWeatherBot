@@ -1,4 +1,4 @@
-version: '3.9'
+version: '2.0'
 services:
   bot:
     build:
@@ -12,6 +12,9 @@ services:
       env.env
     volumes:
       - ./bot:/usr/src/app
+    networks:
+      - weatherbot
+      - brightsky_api
 
 
   image-host:
@@ -23,12 +26,23 @@ services:
       - ./image-host:/usr/src/app
     env_file:
       env.env
-    ports:
-      - 8000:80
     restart: always
+    networks:
+      - weatherbot
+      - system-proxy_default
 
   mongo:
     image: mongo
     volumes:
       - ./mongoData:/data
     restart: always
+    networks:
+      - weatherbot
+
+networks:
+  weatherbot:
+    driver: bridge
+  system-proxy_default:
+    external: true
+  brightsky_api:
+    external: true
