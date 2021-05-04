@@ -34,7 +34,7 @@ from threading import Thread
 from queue import Queue
 from time import sleep
 
-CACHING_TIME = 5 * 60
+CACHING_TIME = 30 * 60
 
 db = Backend()
 
@@ -78,7 +78,7 @@ def getImage(lat: float, lon: float, tenDays: bool) -> Optional[ImageResult]:
         return None
 
     url = "http://image-host/image"
-    files = {'image': imageResult['plot'].read()}
+    files = {'image': imageResult['plot'].getvalue()}
 
     uploadResponse = requests.request("POST", url, files=files)
     uploadJson = cast(UploadResult, json.loads(uploadResponse.text))
@@ -104,7 +104,7 @@ def clearCache():
 
 
 def sendForecast(chat_id: Union[int, str], bot: Bot, lat: float, lon: float, tenDays: bool, name: str = None):
-    waitingMessage = bot.send_message(chat_id, text="⏳")
+    waitingMessage = bot.send_message(chat_id, text="⏳", reply_markup=ReplyKeyboardRemove())
     try:
         result = getImage(lat, lon, tenDays)
         if result == None:

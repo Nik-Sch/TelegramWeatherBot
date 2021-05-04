@@ -18,6 +18,7 @@ from plotnine import ggplot
 from plotnine.geoms.geom_bar import geom_bar
 from plotnine.geoms.geom_point import geom_point
 from plotnine.geoms.geom_text import geom_text
+from plotnine.geoms.geom_blank import geom_blank
 from plotnine.guides.guide_colorbar import guide_colorbar
 from plotnine.guides.guides import guides
 from plotnine.labels import ggtitle
@@ -120,7 +121,7 @@ def plotForecast(forecast: Any, id: str, hourlySun: bool = True) -> io.BytesIO:
                 sunshine['dates'].append(dateWithTime)
                 sunshine['sunshine'].append(element['sunshine'])
     for i in range(len(sunshine['dates'])):
-        sunshine['label'].append(f"{int(np.round(sunshine['sunshine'][i]))}{'h' if hourlySun else 'min'}")
+        sunshine['label'].append(f"{int(np.round(sunshine['sunshine'][i]))}h")
     t2 = time.perf_counter()
     print(f"data: {(t2 - t1) * 1000}ms")
 
@@ -134,7 +135,7 @@ def plotForecast(forecast: Any, id: str, hourlySun: bool = True) -> io.BytesIO:
             figure_size=(14, 5),
         )
     )
-    xScale = scale_x_datetime(date_breaks='1 day', labels=date_format('%a %d.%m.'))
+    xScale = scale_x_datetime(date_breaks='1 day' if hourlySun else '4 hour', labels=date_format('%a %d.%m.' if hourlySun else '%a %H:%M'))
 
     images: List[str] = []
 
@@ -154,21 +155,22 @@ def plotForecast(forecast: Any, id: str, hourlySun: bool = True) -> io.BytesIO:
             'temps': np.array(temps['temps'])[minima],
             'label': list(map(lambda x: f'{int(np.round(x))}°C', np.array(temps['temps'])[minima])),
         }
+        xNudge = 0.2 if hourlySun else 0.02
 
         tempPlot = (
             ggplot(pd.DataFrame(temps))
             + geom_point(aes(x='dates', y='temps', color='temps'))
             + geom_point(aes(x='dates', y='temps'), pd.DataFrame(tempMaxima), color='#C23030')
-            + geom_text(aes(x='dates', y='temps', label='label'), pd.DataFrame(tempMaxima), color='#C23030', nudge_x=0.2, nudge_y=0.5)
+            + geom_text(aes(x='dates', y='temps', label='label'), pd.DataFrame(tempMaxima), color='#C23030', nudge_x=xNudge, nudge_y=0.5)
             + geom_point(aes(x='dates', y='temps'), pd.DataFrame(tempMinima), color='#106BA3')
-            + geom_text(aes(x='dates', y='temps', label='label'), pd.DataFrame(tempMinima), color='#106BA3', nudge_x=0.2, nudge_y=-0.5)
+            + geom_text(aes(x='dates', y='temps', label='label'), pd.DataFrame(tempMinima), color='#106BA3', nudge_x=xNudge, nudge_y=-0.5)
             + ggtitle('Temperature (°C)')
             + xScale
             + guides(color=False)
             + customTheme
         )
         filename = f'{id}-temp.jpg'
-        tempPlot.save(filename)
+        tempPlot.save(filename, verbose=False)
         images.append(filename)
 
     t2 = time.perf_counter()
@@ -187,7 +189,7 @@ def plotForecast(forecast: Any, id: str, hourlySun: bool = True) -> io.BytesIO:
             + customTheme
         )
         filename = f'{id}-rain.jpg'
-        rainplot.save(filename)
+        rainplot.save(filename, verbose=False)
         images.append(filename)
 
     t2 = time.perf_counter()
@@ -198,14 +200,19 @@ def plotForecast(forecast: Any, id: str, hourlySun: bool = True) -> io.BytesIO:
         sunPlot = (
             ggplot(pd.DataFrame(sunshine))
             + geom_bar(aes(x='dates', y='sunshine'), stat='identity', fill='#D9822B')
-            + geom_text(aes(x='dates', y='sunshine', label='label'), color='#D9822B', nudge_y=0.5)
             + ggtitle(f"Sunshine ({'hours' if hourlySun else 'minutes'})")
             + xScale
             + guides(color=False)
             + customTheme
         )
+        if hourlySun:
+            logging.info(f"max: {max(max(sunshine['sunshine']) + 1, 10)}")
+            sunPlot += geom_text(aes(x='dates', y='sunshine', label='label'), color='#D9822B', nudge_y=0.5)
+            sunPlot += ylim(0, max(max(sunshine['sunshine']) + 1, 10))
+        else:
+            sunPlot += ylim(0, 60)
         filename = f'{id}-sun.jpg'
-        sunPlot.save(filename)
+        sunPlot.save(filename, verbose=False)
         images.append(filename)
     t2 = time.perf_counter()
     print(f"sun: {(t2 - t1) * 1000}ms")
