@@ -109,26 +109,6 @@ def plotForecast(forecast: Any, id: str, hourlySun: bool = True) -> io.BytesIO:
                 rainfallProb['percentage'].append(max(element[key] - oldValue, 0))
                 oldValue = element[key]
 
-        # if 'pp00' in element and element['pp00'] != None:
-        #     rainfallProb['dates'].extend([dateWithTime] * 9)
-        #     rainfallProb['amount'].append(5)
-        #     rainfallProb['amount'].append(3)
-        #     rainfallProb['amount'].append(2)
-        #     rainfallProb['amount'].append(1)
-        #     rainfallProb['amount'].append(0.5)
-        #     rainfallProb['amount'].append(0.3)
-        #     rainfallProb['amount'].append(0.2)
-        #     rainfallProb['amount'].append(0.1)
-        #     rainfallProb['amount'].append(0.0)
-        #     rainfallProb['percentage'].append(element['pp50'])
-        #     rainfallProb['percentage'].append(max(element['pp30'] - element['pp50'], 0))
-        #     rainfallProb['percentage'].append(max(element['pp20'] - element['pp30'], 0))
-        #     rainfallProb['percentage'].append(max(element['pp10'] - element['pp20'], 0))
-        #     rainfallProb['percentage'].append(max(element['pp05'] - element['pp10'], 0))
-        #     rainfallProb['percentage'].append(max(element['pp03'] - element['pp05'], 0))
-        #     rainfallProb['percentage'].append(max(element['pp02'] - element['pp03'], 0))
-        #     rainfallProb['percentage'].append(max(element['pp01'] - element['pp02'], 0))
-        #     rainfallProb['percentage'].append(max(element['pp00'] - element['pp01'], 0))
         if 'sunshine' in element and element['sunshine'] != None:
             if hourlySun:
                 try:
