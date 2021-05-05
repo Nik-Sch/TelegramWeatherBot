@@ -83,32 +83,52 @@ def plotForecast(forecast: Any, id: str, hourlySun: bool = True) -> io.BytesIO:
         'sunshine': [],
         'label': []
     }
+    rainProps = {
+        'pp50': 5,
+        'pp30': 3,
+        'pp20': 2,
+        'pp10': 1,
+        'pp05': 0.5,
+        'pp03': 0.3,
+        'pp02': 0.2,
+        'pp01': 0.1,
+        'pp00': 0,
+    }
     for element in forecast['weather']:
         dateWithTime = datetime.strptime(element['timestamp'], '%Y-%m-%dT%H:%M:%S%z')
         date = dateWithTime.replace(hour=0, minute=0, second=0)
         if 'temperature' in element and element['temperature'] != None:
             temps['dates'].append(dateWithTime)
             temps['temps'].append(element['temperature'])
-        if 'pp00' in element and element['pp00'] != None:
-            rainfallProb['dates'].extend([dateWithTime] * 9)
-            rainfallProb['amount'].append(5)
-            rainfallProb['amount'].append(3)
-            rainfallProb['amount'].append(2)
-            rainfallProb['amount'].append(1)
-            rainfallProb['amount'].append(0.5)
-            rainfallProb['amount'].append(0.3)
-            rainfallProb['amount'].append(0.2)
-            rainfallProb['amount'].append(0.1)
-            rainfallProb['amount'].append(0.0)
-            rainfallProb['percentage'].append(element['pp50'])
-            rainfallProb['percentage'].append(max(element['pp30'] - element['pp50'], 0))
-            rainfallProb['percentage'].append(max(element['pp20'] - element['pp30'], 0))
-            rainfallProb['percentage'].append(max(element['pp10'] - element['pp20'], 0))
-            rainfallProb['percentage'].append(max(element['pp05'] - element['pp10'], 0))
-            rainfallProb['percentage'].append(max(element['pp03'] - element['pp05'], 0))
-            rainfallProb['percentage'].append(max(element['pp02'] - element['pp03'], 0))
-            rainfallProb['percentage'].append(max(element['pp01'] - element['pp02'], 0))
-            rainfallProb['percentage'].append(max(element['pp00'] - element['pp01'], 0))
+        
+        oldValue = 0
+        for key, value in rainProps.items():
+            if key in element and element[key] != None:
+                rainfallProb['dates'].append(dateWithTime)
+                rainfallProb['amount'].append(value)
+                rainfallProb['percentage'].append(max(element[key] - oldValue, 0))
+                oldValue = element[key]
+
+        # if 'pp00' in element and element['pp00'] != None:
+        #     rainfallProb['dates'].extend([dateWithTime] * 9)
+        #     rainfallProb['amount'].append(5)
+        #     rainfallProb['amount'].append(3)
+        #     rainfallProb['amount'].append(2)
+        #     rainfallProb['amount'].append(1)
+        #     rainfallProb['amount'].append(0.5)
+        #     rainfallProb['amount'].append(0.3)
+        #     rainfallProb['amount'].append(0.2)
+        #     rainfallProb['amount'].append(0.1)
+        #     rainfallProb['amount'].append(0.0)
+        #     rainfallProb['percentage'].append(element['pp50'])
+        #     rainfallProb['percentage'].append(max(element['pp30'] - element['pp50'], 0))
+        #     rainfallProb['percentage'].append(max(element['pp20'] - element['pp30'], 0))
+        #     rainfallProb['percentage'].append(max(element['pp10'] - element['pp20'], 0))
+        #     rainfallProb['percentage'].append(max(element['pp05'] - element['pp10'], 0))
+        #     rainfallProb['percentage'].append(max(element['pp03'] - element['pp05'], 0))
+        #     rainfallProb['percentage'].append(max(element['pp02'] - element['pp03'], 0))
+        #     rainfallProb['percentage'].append(max(element['pp01'] - element['pp02'], 0))
+        #     rainfallProb['percentage'].append(max(element['pp00'] - element['pp01'], 0))
         if 'sunshine' in element and element['sunshine'] != None:
             if hourlySun:
                 try:
@@ -206,7 +226,6 @@ def plotForecast(forecast: Any, id: str, hourlySun: bool = True) -> io.BytesIO:
             + customTheme
         )
         if hourlySun:
-            logging.info(f"max: {max(max(sunshine['sunshine']) + 1, 10)}")
             sunPlot += geom_text(aes(x='dates', y='sunshine', label='label'), color='#D9822B', nudge_y=0.5)
             sunPlot += ylim(0, max(max(sunshine['sunshine']) + 1, 10))
         else:
