@@ -1,4 +1,4 @@
-from numpy import imag
+
 from telegram.ext import (Updater,
                           CommandHandler,
                           MessageHandler,
@@ -14,7 +14,6 @@ from telegram import (Bot,
                       )
 import os
 import logging
-import json
 from typing import (Any, Dict, Literal, Optional, Union,
                     List,
                     Tuple,
@@ -22,17 +21,17 @@ from typing import (Any, Dict, Literal, Optional, Union,
                     cast
                     )
 from telegram.inline.inlinequeryresultphoto import InlineQueryResultPhoto
+from telegram.inline.inlinequeryresultmpeg4gif import InlineQueryResultMpeg4Gif
 from telegram.message import Message
-import urllib.parse
-import urllib.request
-import requests
-from db import Backend, Location
+from db import Backend, Location, StateType, requestsSession
+from radar import createRadarAnimation
 from weatherProvider import fetchAndPlot, getLocationInfo
 import threading
 import functools
 from threading import Thread
 from queue import Queue
 from time import sleep
+from urllib import parse
 
 CACHING_TIME = 30 * 60
 
@@ -58,12 +57,17 @@ class ImageResult(TypedDict):
     height: int
 
 
-class UploadResult(TypedDict):
+class UploadImageResult(TypedDict):
     id: str
     link: str
     thumb: str
     width: int
     height: int
+
+
+class UploadAnimationResult(TypedDict):
+    id: str
+    link: str
 
 
 def start(update: Update, context: CallbackContext):
@@ -80,8 +84,8 @@ def getImage(lat: float, lon: float, tenDays: bool) -> Optional[ImageResult]:
     url = "http://image-host/image"
     files = {'image': imageResult['plot'].getvalue()}
 
-    uploadResponse = requests.request("POST", url, files=files)
-    uploadJson = cast(UploadResult, json.loads(uploadResponse.text))
+    uploadResponse = requestsSession.request("POST", url, files=files)
+    uploadJson = cast(UploadImageResult, uploadResponse.json())
     return {
         'imageId': uploadJson['id'],
         'imageLink': uploadJson['link'],
@@ -96,11 +100,39 @@ def getImage(lat: float, lon: float, tenDays: bool) -> Optional[ImageResult]:
     }
 
 
-def clearCache():
+def clearImageCache():
     logging.log(msg=getImage.cache_info(), level=20)
     logging.log(msg="clearing cache", level=20)
     getImage.cache_clear()
-    threading.Timer(CACHING_TIME, clearCache).start()
+    threading.Timer(CACHING_TIME, clearImageCache).start()
+
+
+def getRadarAnimation(lat: float, lon: float) -> Tuple[str, str]:
+    radar = createRadarAnimation(lat, lon)
+
+    url = "http://image-host/animation"
+    files = {'animation': radar.getvalue()}
+    uploadResponse = requestsSession.request("POST", url, files=files)
+    uploadJson = cast(UploadAnimationResult, uploadResponse.json())
+    return (uploadJson['id'], uploadJson['link'])
+
+
+def sendRadar(chat_id: Union[int, str], bot: Bot, lat: float, lon: float):
+    waitingMessage = bot.send_message(chat_id, text="⏳", reply_markup=ReplyKeyboardRemove())
+    try:
+        _, link = getRadarAnimation(lat, lon)
+        if link == None:
+            bot.send_message(chat_id, text="Could not create the radar. 😔")
+            return
+        
+        locationText = getLocationName(lat, lon)
+
+        bot.send_animation(chat_id,
+                           animation=link,
+                           caption=f"Radar for {locationText}",
+                           reply_markup=ReplyKeyboardRemove())
+    finally:
+        bot.delete_message(chat_id=chat_id, message_id=waitingMessage.message_id)
 
 
 def sendForecast(chat_id: Union[int, str], bot: Bot, lat: float, lon: float, tenDays: bool, name: str = None):
@@ -108,7 +140,7 @@ def sendForecast(chat_id: Union[int, str], bot: Bot, lat: float, lon: float, ten
     try:
         result = getImage(lat, lon, tenDays)
         if result == None:
-            bot.send_message(chat_id, text="The location has no weather data.")
+            bot.send_message(chat_id, text="The location has no weather station nearby.")
             return
 
         station_text = f"forecast for {name}." if (
@@ -119,8 +151,6 @@ def sendForecast(chat_id: Union[int, str], bot: Bot, lat: float, lon: float, ten
                        reply_markup=ReplyKeyboardRemove())
     except Exception as e:
         bot.send_message(chat_id, text="Uh oh, an error occured.")
-        logging.exception("Stuff")
-        raise
     finally:
         bot.delete_message(chat_id=chat_id, message_id=waitingMessage.message_id)
 
@@ -135,7 +165,11 @@ def getStuff(update: Update) -> Tuple[str, Message]:
 
 
 def addLocation(chat_id: str, bot: Bot, lat: float, lon: float):
-    name, dist = getLocationInfo(lat, lon)
+    info = getLocationInfo(lat, lon)
+    if info == None:
+        bot.send_message(chat_id, f"I couldn't find a weather station near the location. 😔")
+        return
+    name, dist = info
     if db.addLocation(chat_id, {
         'name': name,
         'lat': lat,
@@ -175,7 +209,7 @@ def locationReplyKeyboard(locations: List[Location]) -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=True)
 
 
-def getWrapper(update: Update, context: CallbackContext, tenDays: bool):
+def getWrapper(update: Update, context: CallbackContext, what: StateType):
     chat_id, message = getStuff(update)
     locations = list(db.getLocations(chat_id))
     if len(locations) == 0:
@@ -185,7 +219,7 @@ def getWrapper(update: Update, context: CallbackContext, tenDays: bool):
 
     locationNames = list(map(lambda x: x['name'], locations))
     if context.args != None and len(context.args) == 0:
-        db.setState(chat_id, {'type': 'getTenDays' if tenDays else 'get'})
+        db.setState(chat_id, {'type': what})
         message.reply_text(
             'Choose a station.', reply_markup=locationReplyKeyboard(locations))
         return
@@ -195,16 +229,23 @@ def getWrapper(update: Update, context: CallbackContext, tenDays: bool):
             chat_id, text=f"You have not added {context.args[0]}.\n You have added {', '.join(locationNames)}.")
         return
     location = next(filter(lambda x: x['name'] == context.args[0], locations), None)
-    sendForecast(chat_id, context.bot,
-                 location['lat'], location['lon'], tenDays=tenDays, name=location['name'])
+    if what == 'getRadar':
+        sendRadar(chat_id, context.bot, location['lat'], location['lon'])
+    else:
+        sendForecast(chat_id, context.bot,
+                     location['lat'], location['lon'], tenDays=what == 'getTenDays', name=location['name'])
 
 
-def get(update: Update, context: CallbackContext):
-    getWrapper(update, context, True)
+def getForecast(update: Update, context: CallbackContext):
+    getWrapper(update, context, 'getTenDays')
 
 
-def getDetailed(update: Update, context: CallbackContext):
-    getWrapper(update, context, False)
+def getDetailedForecast(update: Update, context: CallbackContext):
+    getWrapper(update, context, 'get')
+
+
+def getRadar(update: Update, context: CallbackContext):
+    getWrapper(update, context, 'getRadar')
 
 
 def delete(update: Update, context: CallbackContext):
@@ -241,31 +282,37 @@ def handleText(update: Update, context: CallbackContext):
     chat_id, message = getStuff(update)
     state = db.getState(chat_id)
     db.setState(chat_id, {'type': 'idle'})
+    if 'type' not in state:
+        raise ValueError('type is not in state')
 
-    if state['type'] == 'get' or state['type'] == 'getTenDays':  # type: ignore
+    if state['type'] == 'get' or state['type'] == 'getTenDays' or state['type'] == 'getRadar':
         if 'addLocations' in state:
             selectedLocation = next(filter(lambda l: l['name'] == message.text, state['addLocations']), None)
             if selectedLocation != None:
+                # type will always be 'get' and send both
+                sendRadar(chat_id, context.bot, selectedLocation['lat'], selectedLocation['lon'])
                 sendForecast(chat_id, context.bot, selectedLocation['lat'], selectedLocation['lon'], True)
             else:
                 context.bot.send_message(chat_id, text="Invalid location selected.", reply_markup=ReplyKeyboardRemove())
             db.setState(chat_id, {'type': 'idle'})
         else:
             locations = db.getLocations(chat_id)
-            location = next(filter(lambda x: x['name'] == message.text, locations), None)
-            if location != None:
-                sendForecast(chat_id, context.bot,
-                             location['lat'], location['lon'], name=location['name'], tenDays=state['type'] == 'getTenDays')  # type: ignore
+            selectedLocation = next(filter(lambda x: x['name'] == message.text, locations), None)
+            if selectedLocation != None:
+                if state['type'] == 'getRadar':
+                    sendRadar(chat_id, context.bot, selectedLocation['lat'], selectedLocation['lon'])
+                else:
+                    sendForecast(chat_id, context.bot, selectedLocation['lat'], selectedLocation['lon'], state['type'] == 'getTenDays')
             else:
                 context.bot.send_message(
                     chat_id, text="Invalid station name.", reply_markup=ReplyKeyboardRemove())
 
-    elif state['type'] == 'rename':  # type: ignore
+    elif state['type'] == 'rename':
         locations = db.getLocations(chat_id)
 
         # new name
         if 'location' in state:
-            location = next(filter(lambda x: x['name'] == state['location']['name'], locations), None)  # type: ignore
+            location = next(filter(lambda x: x['name'] == state['location']['name'], locations), None) # type: ignore
             if location != None:
                 db.renameLocation(chat_id, location, message.text)
                 context.bot.send_message(
@@ -285,7 +332,7 @@ def handleText(update: Update, context: CallbackContext):
             context.bot.send_message(
                 chat_id, text="Invalid station name.", reply_markup=ReplyKeyboardRemove())
 
-    elif state['type'] == 'remove':  # type: ignore
+    elif state['type'] == 'remove':
         locations = db.getLocations(chat_id)
         location = next(filter(lambda x: x['name'] == message.text, locations), None)
         if location != None:
@@ -296,7 +343,7 @@ def handleText(update: Update, context: CallbackContext):
             context.bot.send_message(
                 chat_id, text="Invalid station name.", reply_markup=ReplyKeyboardRemove())
 
-    elif state['type'] == 'add':  # type: ignore
+    elif state['type'] == 'add':
         if 'addLocations' in state:
             selectedLocation = next(filter(lambda l: l['name'] == message.text, state['addLocations']), None)
             if selectedLocation != None:
@@ -318,7 +365,7 @@ def handleText(update: Update, context: CallbackContext):
                 context.bot.send_message(chat_id,
                                          text="I couldn't find a location.",
                                          reply_markup=ReplyKeyboardRemove())
-    elif state['type'] == 'idle' and message.chat.type == 'private':  # type: ignore
+    elif state['type'] == 'idle' and message.chat.type == 'private':
         addLocations = queryLocations(message.text)
         if len(addLocations) > 0:
             db.setState(chat_id, {
@@ -357,37 +404,67 @@ def osmToLocation(element: Any) -> Location:
 
 
 def queryLocations(query: str) -> List[Location]:
-    with urllib.request.urlopen(f"https://nominatim.openstreetmap.org/search?q={urllib.parse.quote(query, safe='')}&format=jsonv2") as url:
-        return list(map(osmToLocation, json.loads(url.read().decode())))
+    result = requestsSession.get(f"https://nominatim.openstreetmap.org/search?q={parse.quote(query, safe='')}&format=jsonv2").json()
+    return list(map(osmToLocation, result))
 
+
+def getLocationName(lat: float, lon: float) -> str:
+    result = requestsSession.get(f"https://nominatim.openstreetmap.org/reverse?lat={lat}&lon={lon}&zoom=14&format=jsonv2").json()
+    res = result['display_name']
+    return res
 
 
 inlineQueues: Dict[str, "Queue[Optional[InlineQueryResult]]"] = {}
 
+
+def queueImage(lat: float, lon: float, query: str, queryId: str):
+    imageResult = getImage(lat, lon, True)
+    if imageResult != None:
+        logging.info(f"inline queueing {imageResult['imageId']}.")
+        text = f"Weather for station {imageResult['weather_station']}. Searched for '{query}'."
+        inlineQueues[queryId].put(
+            InlineQueryResultPhoto(
+                id=imageResult['imageId'],
+                photo_url=imageResult['imageLink'],
+                thumb_url=imageResult['thumbLink'],
+                photo_height=imageResult['height'],
+                photo_width=imageResult['width'],
+                description=text,
+                caption=text,
+                title=imageResult['weather_station'],
+            )
+        )
+
+def queueRadar(lat: float, lon: float, query: str, queryId: str):
+    radarId, link = getRadarAnimation(lat, lon)
+    locationName = getLocationName(lat, lon)
+    logging.info(f"inline queueing radar {radarId}.")
+    text = f"Radar for {locationName}. Searched for '{query}'."
+    inlineQueues[queryId].put(
+        InlineQueryResultMpeg4Gif(
+            id=radarId,
+            mpeg4_url=link,
+            thumb_url=link,
+            mpeg4_height=512,
+            mpeg4_width=512,
+            description=text,
+            caption=text,
+            title=locationName,
+        )
+    )
+
+
 def provideImagesForQuery(query: str, queryId: str):
     locations = queryLocations(query)
     for location in locations:
-        imageResult = getImage(location['lat'], location['lon'], True)
-        if imageResult != None:
-            logging.info(f"queueing {imageResult['imageId']}.")
-            text = f"Weather for station {imageResult['weather_station']}. Searched for '{query}'."
-            inlineQueues[queryId].put(
-                InlineQueryResultPhoto(
-                    id=imageResult['imageId'],
-                    photo_url=imageResult['imageLink'],
-                    thumb_url=imageResult['thumbLink'],
-                    photo_height=imageResult['height'],
-                    photo_width=imageResult['width'],
-                    description=text,
-                    caption=text,
-                    title=imageResult['weather_station'],
-                )
-            )
-    logging.info('queuing None, finished.')
+        queueRadar(location['lat'], location['lon'], query, queryId)
+        queueImage(location['lat'], location['lon'], query, queryId)
+    logging.info('inline queuing None, finished.')
     inlineQueues[queryId].put(None)
     sleep(5)
-    logging.info(f"deleting queue {queryId}")
+    logging.info(f"inline deleting queue {queryId}")
     del inlineQueues[queryId]
+
 
 
 def handleInlineQuery(update: Update, context: CallbackContext):
@@ -407,20 +484,20 @@ def handleInlineQuery(update: Update, context: CallbackContext):
     else:
         firstQueryId, counter = offset.split('-')
 
-
     answers: List[InlineQueryResult] = []
 
     if firstQueryId in inlineQueues:
         nextItem = inlineQueues[firstQueryId].get()
         if nextItem != None:
-            logging.info(f"got {nextItem.id}")
+            logging.info(f"inline got {nextItem.id}")
             answers.append(nextItem)
 
-    logging.info(f"sending {len(answers)} items, counter = {counter}")
+    logging.info(f"inline sending {len(answers)} items, counter = {counter}")
     context.bot.answer_inline_query(queryId, results=answers, cache_time=CACHING_TIME, next_offset=f"{firstQueryId}-{int(counter) + 1}")
 
 
 def handleError(update: Update, context: CallbackContext):
+    logging.error(context.error, exc_info=True)
     try:
         context.bot.send_message(update.effective_chat.id, text="Uh oh, something went wrong.\nIf you like you can tell @NikSch.")
     except:
@@ -435,8 +512,9 @@ logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s
 dispatcher.add_handler(CommandHandler('start', start))
 dispatcher.add_handler(CommandHandler('add', add))
 dispatcher.add_handler(CommandHandler('getAll', getAll))
-dispatcher.add_handler(CommandHandler('get', get))
-dispatcher.add_handler(CommandHandler('getDetailed', getDetailed))
+dispatcher.add_handler(CommandHandler('get', getForecast))
+dispatcher.add_handler(CommandHandler('getDetailed', getDetailedForecast))
+dispatcher.add_handler(CommandHandler('radar', getRadar))
 dispatcher.add_handler(CommandHandler('rename', rename))
 dispatcher.add_handler(CommandHandler('delete', delete))
 dispatcher.add_handler(CommandHandler('remove', delete))
@@ -445,6 +523,6 @@ dispatcher.add_handler(MessageHandler(Filters.text, handleText))
 dispatcher.add_handler(InlineQueryHandler(handleInlineQuery))
 dispatcher.add_error_handler(handleError)
 
-clearCache()
+clearImageCache()
 
 updater.start_polling()

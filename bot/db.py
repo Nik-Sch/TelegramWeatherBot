@@ -1,16 +1,24 @@
-from enum import Enum
 from typing import Iterator, List, Literal, TypedDict
 from pymongo import MongoClient
 from pymongo.database import Database
+from requests_cache import CachedSession
+from requests_cache.backends import MongoCache
+import os
+import logging
 
+mongoClient = MongoClient('mongo', 27017)
+
+requestsSession = CachedSession(backend=MongoCache(connection=mongoClient), secret_key=os.environ.get('MONGO_CACHE_KEY'))
 
 class Location(TypedDict):
     lat: float
     lon: float
     name: str
 
+
+StateType = Literal['idle', 'get', 'getTenDays', 'getRadar', 'add', 'rename', 'remove']
 class State(TypedDict, total=False):
-    type: Literal['idle', 'get', 'getTenDays', 'add', 'rename', 'remove']
+    type: StateType
     location: Location # NotRequired[Location] doesn't work...
     addLocations: List[Location] # NotRequired[Location] doesn't work...
 
@@ -19,7 +27,7 @@ class Backend():
     db: Database
 
     def __init__(self) -> None:
-        self.db = MongoClient('mongo', 27017).weatherDB
+        self.db = mongoClient.weatherDB
         self.db.locations.create_index(
             [('chat', 1), ('location.lat', 1), ('location.lon', 1)], unique=True)
 

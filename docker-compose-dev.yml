@@ -34,7 +34,7 @@ services:
   mongo:
     image: mongo
     volumes:
-      - ./mongoData:/data
+      - ./data:/data
     restart: always
     networks:
       - weatherbot

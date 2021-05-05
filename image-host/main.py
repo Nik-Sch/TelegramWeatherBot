@@ -31,9 +31,38 @@ def e500(_):
 def saveFile(jpg: Any, imagePath: str, thumbPath: str):
     logging.log(msg=f"thread image: {imagePath}", level=30)
 
+@app.route('/animation', methods=['POST'])
+def postAnimation() -> Response:
+    if socket.gethostbyname('bot') != request.remote_addr:
+        return e405(0)
+
+    if 'animation' not in request.files:
+        return make_response(jsonify({'error': 'No animation'}), 400)
+    file = request.files['animation']
+    if file:
+        hash = hashlib.sha256()
+        fb = file.read(65536)
+        while len(fb) > 0:
+            hash.update(fb)
+            fb = file.read(65536)
+        file.seek(0)
+        hash = hash.hexdigest()[:10]
+        name = f"{hash}.mp4"
+        file.save(f'/data/{name}')
+        response = jsonify({
+            'id': hash,
+            'link': f"{os.environ.get('BASE_URL')}/animation/{name}",
+        })
+        response.status_code = 201
+        response.autocorrect_location_header = False
+        return response
+    else:
+        return make_response(jsonify({'error': 'No valid mp4 animation'}), 400)
+
+
 
 @app.route('/image', methods=['POST'])
-def post() -> Response:
+def postImage() -> Response:
     if socket.gethostbyname('bot') != request.remote_addr:
         return e405(0)
 
@@ -75,6 +104,7 @@ def post() -> Response:
 
 
 @app.route('/image/<file>', methods=['GET'])
+@app.route('/animation/<file>', methods=['GET'])
 def get(file: str) -> Response:
     return send_from_directory('/data', file)
 
@@ -83,7 +113,7 @@ def deleteOldImages():
     while True:
         logging.log(msg="deleting old images", level=30)
 
-        for item in Path('/data/').glob('*.jpg'):
+        for item in [p for p in Path('./').glob('*.*') if p.suffix in ['.jpg', '.mp4']]:
             try:
                 if item.is_file():
                     itemTime = datetime.fromtimestamp(item.stat().st_mtime)

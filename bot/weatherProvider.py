@@ -4,7 +4,6 @@ import json
 import logging
 import os
 import matplotlib
-import urllib.request
 from typing import Any, List, Optional, Tuple, TypedDict
 from numpy.lib import math
 from scipy.signal import find_peaks
@@ -18,7 +17,6 @@ from plotnine import ggplot
 from plotnine.geoms.geom_bar import geom_bar
 from plotnine.geoms.geom_point import geom_point
 from plotnine.geoms.geom_text import geom_text
-from plotnine.geoms.geom_blank import geom_blank
 from plotnine.guides.guide_colorbar import guide_colorbar
 from plotnine.guides.guides import guides
 from plotnine.labels import ggtitle
@@ -32,6 +30,7 @@ from plotnine.themes.theme_minimal import theme_minimal
 from scipy.signal import find_peaks
 import numpy as np
 from PIL import Image
+from db import requestsSession
 
 matplotlib.use('cairo')
 
@@ -227,15 +226,16 @@ def plotForecast(forecast: Any, id: str, hourlySun: bool = True) -> io.BytesIO:
 def fetchAndPlot(lat: float, lon: float, duration: float) -> Optional[WeatherResult]:
     if (duration > 10):
         duration = 10
-    today = datetime.now().isoformat()
-    lastday = (datetime.now() + timedelta(days=duration)).isoformat()
+    today = datetime.now().replace(minute=0, second=0, microsecond=0).isoformat()
+    lastday = (datetime.now() + timedelta(days=duration)).replace(minute=0, second=0, microsecond=0).isoformat()
     forecast = {}
     try:
-        with urllib.request.urlopen(f"{BRIGHTSKY_SERVER}/weather?lat={lat}&lon={lon}&date={today}&last_date={lastday}") as url:
-            text = url.read().decode()
-            forecast = json.loads(text)
+        forecast = requestsSession.get(f"{BRIGHTSKY_SERVER}/weather?lat={lat}&lon={lon}&date={today}&last_date={lastday}", expire_after=30*60).json()
     except Exception as e:
         logging.error(f"Couldn't fetch {lat}, {lon}, {e}")
+        return None
+
+    if 'sources' not in forecast or 'weather' not in forecast:
         return None
 
     weather_station = forecast['sources'][0]['station_name']
@@ -243,9 +243,7 @@ def fetchAndPlot(lat: float, lon: float, duration: float) -> Optional[WeatherRes
 
     outbuffer = plotForecast(forecast, f"{lat}_{lon}", duration > 2)
     try:
-        current = []
-        with urllib.request.urlopen(f"{BRIGHTSKY_SERVER}/current_weather?lat={lat}&lon={lon}") as url:
-            current = json.loads(url.read().decode())
+        current = requestsSession.get(f"{BRIGHTSKY_SERVER}/current_weather?lat={lat}&lon={lon}", expire_after=5*60).json()
         return {
             'plot': outbuffer,
             'duration': duration,
@@ -265,7 +263,10 @@ def fetchAndPlot(lat: float, lon: float, duration: float) -> Optional[WeatherRes
         }
 
 
-def getLocationInfo(lat: float, lon: float) -> Tuple[str, float]:
-    with urllib.request.urlopen(f"{BRIGHTSKY_SERVER}/sources?lat={lat}&lon={lon}") as url:
-        source = json.loads(url.read().decode())['sources'][0]
+def getLocationInfo(lat: float, lon: float) -> Optional[Tuple[str, float]]:
+    try:
+        sources = requestsSession.get(f"{BRIGHTSKY_SERVER}/sources?lat={lat}&lon={lon}", expire_after=timedelta(days=7)).json()
+        source = sources['sources'][0]
         return (source['station_name'].title(), int(source['distance'] / 100) / 10)
+    except Exception:
+        return None
