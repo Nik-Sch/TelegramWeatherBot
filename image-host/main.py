@@ -111,15 +111,15 @@ def get(file: str) -> Response:
 
 def deleteOldImages():
     while True:
-        logging.log(msg="deleting old images", level=30)
+        logging.warning("deleting old images")
 
-        for item in [p for p in Path('./').glob('*.*') if p.suffix in ['.jpg', '.mp4']]:
+        for item in Path('/data/').glob('*'):
             try:
                 if item.is_file():
                     itemTime = datetime.fromtimestamp(item.stat().st_mtime)
                     if itemTime < datetime.now() - timedelta(days=2):
                         os.remove(item)
-                        logging.log(msg=f"deleted {item}", level=20)
+                        logging.warning(f"deleted {item}")
             except:
                 pass
         gevent.sleep(60 * 60)
