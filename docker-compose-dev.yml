@@ -11,6 +11,7 @@ services:
     env_file:
       env.env
     volumes:
+      - ./cache:/cache
       - ./bot:/usr/src/app
     networks:
       - weatherbot
@@ -34,7 +35,7 @@ services:
   mongo:
     image: mongo
     volumes:
-      - ./data:/data
+      - ./data:/data/db
     restart: always
     networks:
       - weatherbot

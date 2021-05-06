@@ -4,11 +4,6 @@ from pymongo.database import Database
 from requests_cache import CachedSession
 from requests_cache.backends import MongoCache
 import os
-import logging
-
-mongoClient = MongoClient('mongo', 27017)
-
-requestsSession = CachedSession(backend=MongoCache(connection=mongoClient), secret_key=os.environ.get('MONGO_CACHE_KEY'))
 
 class Location(TypedDict):
     lat: float
@@ -22,12 +17,17 @@ class State(TypedDict, total=False):
     location: Location # NotRequired[Location] doesn't work...
     addLocations: List[Location] # NotRequired[Location] doesn't work...
 
+def getRequestsCache():
+    return CachedSession(cache_name='/cache/http_cache.sqlite')
 
 class Backend():
+    mongoClient = MongoClient('mongo', 27017, connect=False)
+    requestsSession = getRequestsCache()
+
     db: Database
 
     def __init__(self) -> None:
-        self.db = mongoClient.weatherDB
+        self.db = self.mongoClient.weatherDB
         self.db.locations.create_index(
             [('chat', 1), ('location.lat', 1), ('location.lon', 1)], unique=True)
 

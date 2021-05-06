@@ -9,6 +9,8 @@ services:
       - image-host
     env_file:
       env.env
+    volumes:
+      - ./cache:/cache
     networks:
       - weatherbot
       - brightsky_api
@@ -28,7 +30,7 @@ services:
   mongo:
     image: mongo
     volumes:
-      - ./data:/data
+      - ./data:/data/db
     restart: always
     networks:
       - weatherbot
