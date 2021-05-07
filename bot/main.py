@@ -30,7 +30,7 @@ from weatherProvider import WeatherProvider
 import threading
 import functools
 from threading import Thread
-from multiprocessing import Queue, Pool
+from multiprocessing import Queue, Pool, pool
 from time import sleep
 from urllib import parse
 from dataclasses import dataclass
@@ -187,8 +187,11 @@ def inlineInit(q: Queue):
 
 class MainBot:
     db: Backend
-    weatherProvider: WeatherProvider
-    radar: Radar
+
+    inlineQueues: Dict[str, "Queue[Optional[QueueElement]]"] = {}
+    inlineSentResultIds: Dict[str, List[str]] = {}
+    inlinePools: Dict[str, pool.Pool] = {}
+    activeInlineUsers: Dict[int, str] = {}
 
     def __init__(self, db: Backend) -> None:
         self.db = db
@@ -241,7 +244,7 @@ class MainBot:
         return (update.effective_chat.id, message)
 
     def addLocation(self, chat_id: str, bot: Bot, lat: float, lon: float):
-        info = self.weatherProvider.getLocationInfo(lat, lon)
+        info = WeatherProvider().getLocationInfo(lat, lon)
         if info == None:
             bot.send_message(chat_id, f"I couldn't find a weather station near the location. 😔")
             return
@@ -471,21 +474,22 @@ class MainBot:
         return list(map(self.osmToLocation, result))
 
 
-    inlineQueues: Dict[str, "Queue[Optional[QueueElement]]"] = {}
-
     def provideImagesForQuery(self, query: str, queryId: str):
         POOL_SIZE = 4
 
         locations = self.queryLocations(query)
         params = map(lambda loc: QueryParameter(loc, query), locations)
         with Pool(POOL_SIZE, inlineInit, [self.inlineQueues[queryId]]) as pool:
+            self.inlinePools[queryId] = pool
             pool.map(createResults, params, int(len(locations) / POOL_SIZE))
+            del self.inlinePools[queryId]
 
         logging.info('inline queuing None, finished.')
         self.inlineQueues[queryId].put(None)
         sleep(5)
         logging.info(f"inline deleting queue {queryId}")
-        del self.inlineQueues[queryId]
+        if queryId in self.inlineQueues:
+            del self.inlineQueues[queryId]
 
     def queueElementToResult(self, elem: QueueElement) -> InlineQueryResult:
         if elem.type == 'photo':
@@ -511,18 +515,44 @@ class MainBot:
                 title=elem.title,
             )
 
+    def stopQuery(self, qid: str):
+        logging.info(f'stopping {qid}')
+        if qid in self.inlineSentResultIds:
+            del self.inlineSentResultIds[qid]
+        if qid in self.inlinePools:
+            self.inlinePools[qid].terminate()
+            del self.inlinePools[qid]
+        if qid in self.inlineQueues:
+            del self.inlineQueues[qid]
 
     def handleInlineQuery(self, update: Update, context: CallbackContext):
+
+
         query: str = update.inline_query.query
         queryId: str = update.inline_query.id
         offset: str = update.inline_query.offset
+        userId: int = update.inline_query.from_user.id
         firstQueryId: str = ''
         counter: str = '0'
+        # logging.info(f"""
+        # -----------------------------------
+        # '{offset}':
+        # pools: {list(self.inlinePools.keys())}
+        # queues: {list(self.inlineQueues.keys())}
+        # users: {list(self.activeInlineUsers.keys())}
+        # """)
+
         if offset == '':
             # first call for current query
-            logging.info(f"creating queue {queryId}")
+            if userId in self.activeInlineUsers:
+                oldQueryId = self.activeInlineUsers[userId]
+                logging.info(f'terminating {oldQueryId} because user has a new query')
+                self.stopQuery(oldQueryId)
+
             firstQueryId = queryId
+            self.activeInlineUsers[userId] = firstQueryId
             self.inlineQueues[firstQueryId] = Queue()
+            self.inlineSentResultIds[firstQueryId] = []
             thread = Thread(target=self.provideImagesForQuery, args=(query, firstQueryId))
             thread.start()
         else:
@@ -531,15 +561,31 @@ class MainBot:
         answers: List[InlineQueryResult] = []
 
         if firstQueryId in self.inlineQueues:
+            # be sure to get at least one valid item
             nextItem = self.inlineQueues[firstQueryId].get()
+            while nextItem != None and nextItem.id in self.inlineSentResultIds[firstQueryId]:
+                nextItem = self.inlineQueues[firstQueryId].get()
+
+            # while nextItem is not None (end of queue), add it and try to get more items
             while nextItem != None:
-                answers.append(self.queueElementToResult(nextItem))
+                if nextItem.id not in self.inlineSentResultIds[firstQueryId]:
+                    self.inlineSentResultIds[firstQueryId].append(nextItem.id)
+                    answers.append(self.queueElementToResult(nextItem))
                 try:
                     nextItem = self.inlineQueues[firstQueryId].get(timeout=0.5)
                 except Empty:
                     nextItem = None
+
+        if len(answers) == 0:
+            self.stopQuery(firstQueryId)
+
         logging.info(f'*** inline sending {len(answers)} items')
-        update.inline_query.answer(answers, cache_time=CACHING_TIME, next_offset=f"{firstQueryId}-{int(counter) + 1}")
+        try:
+            update.inline_query.answer(answers, cache_time=10, next_offset=f"{firstQueryId}-{int(counter) + 1}")
+        except BaseException as e:
+            logging.error(e, exc_info=True)
+            logging.info(f'terminating {firstQueryId}')
+            self.stopQuery(firstQueryId)
 
     def handleError(self, update: Update, context: CallbackContext):
         logging.error(context.error, exc_info=True)
@@ -580,11 +626,11 @@ if __name__ == '__main__':
     clearImageCache()
 
     
-    # updater.start_polling()
-    updater.start_webhook(
-        listen='0.0.0.0',
-        port=80,
-        url_path=TOKEN,
-        webhook_url=f"{HOSTNAME}/{TOKEN}"
-    )
-    updater.idle()
+    updater.start_polling()
+    # updater.start_webhook(
+    #     listen='0.0.0.0',
+    #     port=80,
+    #     url_path=TOKEN,
+    #     webhook_url=f"{HOSTNAME}/{TOKEN}"
+    # )
+    # updater.idle()

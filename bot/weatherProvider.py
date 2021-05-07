@@ -33,6 +33,7 @@ from scipy.signal import find_peaks
 import numpy as np
 from PIL import Image
 from backend import getRequestsCache
+from radar import printTime
 
 
 matplotlib.use('cairo')
@@ -132,7 +133,7 @@ class WeatherProvider:
         for i in range(len(sunshine['dates'])):
             sunshine['label'].append(f"{int(np.round(sunshine['sunshine'][i]))}h")
         t2 = time.perf_counter()
-        print(f"data: {(t2 - t1) * 1000}ms")
+        printTime('data', t1, t2)
 
         customTheme = (
             theme_minimal()
@@ -183,7 +184,7 @@ class WeatherProvider:
             images.append(filename)
 
         t2 = time.perf_counter()
-        print(f"temp: {(t2 - t1) * 1000}ms")
+        printTime('temp', t1, t2)
 
         t1 = time.perf_counter()
         if len(rainfallProb['dates']) > 0:
@@ -202,7 +203,7 @@ class WeatherProvider:
             images.append(filename)
 
         t2 = time.perf_counter()
-        print(f"rain: {(t2 - t1) * 1000}ms")
+        printTime('rain', t1, t2)
 
         t1 = time.perf_counter()
         if len(sunshine['dates']) > 0:
@@ -223,12 +224,12 @@ class WeatherProvider:
             sunPlot.save(filename, verbose=False)
             images.append(filename)
         t2 = time.perf_counter()
-        print(f"sun: {(t2 - t1) * 1000}ms")
+        printTime('sun', t1, t2)
 
         t1 = time.perf_counter()
         result = self.concatImages(images)
         t2 = time.perf_counter()
-        print(f"concat: {(t2 - t1) * 1000}ms")
+        printTime('concat', t1, t2)
         return result
 
 
