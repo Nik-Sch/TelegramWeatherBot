@@ -551,8 +551,14 @@ class MainBot:
 if __name__ == '__main__':
     db = Backend()
     bot = MainBot(db)
+    TOKEN = os.environ.get('BOT_TOKEN')
+    if TOKEN == None:
+        raise TypeError('No bot token defined')
+    HOSTNAME = os.environ.get('BOT_URL')
+    if HOSTNAME == None:
+        raise TypeError('No bot url defined')
 
-    updater = Updater(token=os.environ.get('BOT_TOKEN'))
+    updater = Updater(token=TOKEN)
     dispatcher = updater.dispatcher
 
     logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -573,4 +579,12 @@ if __name__ == '__main__':
 
     clearImageCache()
 
-    updater.start_polling()
+    
+    # updater.start_polling()
+    updater.start_webhook(
+        listen='0.0.0.0',
+        port=80,
+        url_path=TOKEN,
+        webhook_url=f"{HOSTNAME}/{TOKEN}"
+    )
+    updater.idle()

@@ -51,7 +51,7 @@ def postAnimation() -> Response:
         file.save(f'/data/{name}')
         response = jsonify({
             'id': hash,
-            'link': f"{os.environ.get('BASE_URL')}/animation/{name}",
+            'link': f"{os.environ.get('IMAGES_URL')}/animation/{name}",
         })
         response.status_code = 201
         response.autocorrect_location_header = False
@@ -89,8 +89,8 @@ def postImage() -> Response:
 
             response = jsonify({
                 'id': hash,
-                'link': f"{os.environ.get('BASE_URL')}/image/{imageName}",
-                'thumb': f"{os.environ.get('BASE_URL')}/image/{thumbName}",
+                'link': f"{os.environ.get('IMAGES_URL')}/image/{imageName}",
+                'thumb': f"{os.environ.get('IMAGES_URL')}/image/{thumbName}",
                 'width': width,
                 'height': height
             })
