@@ -475,9 +475,9 @@ class MainBot:
 
 
     def provideImagesForQuery(self, query: str, queryId: str):
-        POOL_SIZE = 4
+        POOL_SIZE = 2
 
-        locations = self.queryLocations(query)
+        locations = self.queryLocations(query)[:3]
         params = map(lambda loc: QueryParameter(loc, query), locations)
         with Pool(POOL_SIZE, inlineInit, [self.inlineQueues[queryId]]) as pool:
             self.inlinePools[queryId] = pool
@@ -562,9 +562,13 @@ class MainBot:
 
         if firstQueryId in self.inlineQueues:
             # be sure to get at least one valid item
-            nextItem = self.inlineQueues[firstQueryId].get()
-            while nextItem != None and nextItem.id in self.inlineSentResultIds[firstQueryId]:
-                nextItem = self.inlineQueues[firstQueryId].get()
+            try:
+                nextItem = self.inlineQueues[firstQueryId].get(timeout=15)
+                while nextItem != None and nextItem.id in self.inlineSentResultIds[firstQueryId]:
+                    nextItem = self.inlineQueues[firstQueryId].get(timeout=15)
+            except Empty:
+                logging.info("15s timeout while waiting for inline")
+                nextItem = None
 
             # while nextItem is not None (end of queue), add it and try to get more items
             while nextItem != None:
@@ -584,8 +588,9 @@ class MainBot:
             update.inline_query.answer(answers, cache_time=10, next_offset=f"{firstQueryId}-{int(counter) + 1}")
         except BaseException as e:
             logging.error(e, exc_info=True)
-            logging.info(f'terminating {firstQueryId}')
-            self.stopQuery(firstQueryId)
+            if userId in self.activeInlineUsers and self.activeInlineUsers[userId] == firstQueryId:
+                logging.info(f'terminating {firstQueryId}')
+                self.stopQuery(firstQueryId)
 
     def handleError(self, update: Update, context: CallbackContext):
         logging.error(context.error, exc_info=True)
@@ -604,23 +609,23 @@ if __name__ == '__main__':
     if HOSTNAME == None:
         raise TypeError('No bot url defined')
 
-    updater = Updater(token=TOKEN)
+    updater = Updater(token=TOKEN, workers=8)
     dispatcher = updater.dispatcher
 
     logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
                         level=logging.INFO)
-    dispatcher.add_handler(CommandHandler('start', bot.start))
-    dispatcher.add_handler(CommandHandler('add', bot.add))
-    dispatcher.add_handler(CommandHandler('getAll', bot.getAll))
-    dispatcher.add_handler(CommandHandler('get', bot.getForecast))
-    dispatcher.add_handler(CommandHandler('getDetailed', bot.getDetailedForecast))
-    dispatcher.add_handler(CommandHandler('radar', bot.getRadar))
-    dispatcher.add_handler(CommandHandler('rename', bot.rename))
-    dispatcher.add_handler(CommandHandler('delete', bot.delete))
-    dispatcher.add_handler(CommandHandler('remove', bot.delete))
-    dispatcher.add_handler(MessageHandler(Filters.location, bot.handleLocation))
-    dispatcher.add_handler(MessageHandler(Filters.text, bot.handleText))
-    dispatcher.add_handler(InlineQueryHandler(bot.handleInlineQuery))
+    dispatcher.add_handler(CommandHandler('start', bot.start, run_async=True))
+    dispatcher.add_handler(CommandHandler('add', bot.add, run_async=True))
+    dispatcher.add_handler(CommandHandler('getAll', bot.getAll, run_async=True))
+    dispatcher.add_handler(CommandHandler('get', bot.getForecast, run_async=True))
+    dispatcher.add_handler(CommandHandler('getDetailed', bot.getDetailedForecast, run_async=True))
+    dispatcher.add_handler(CommandHandler('radar', bot.getRadar, run_async=True))
+    dispatcher.add_handler(CommandHandler('rename', bot.rename, run_async=True))
+    dispatcher.add_handler(CommandHandler('delete', bot.delete, run_async=True))
+    dispatcher.add_handler(CommandHandler('remove', bot.delete, run_async=True))
+    dispatcher.add_handler(MessageHandler(Filters.location, bot.handleLocation, run_async=True))
+    dispatcher.add_handler(MessageHandler(Filters.text, bot.handleText, run_async=True))
+    dispatcher.add_handler(InlineQueryHandler(bot.handleInlineQuery, run_async=True))
     dispatcher.add_error_handler(bot.handleError)
 
     clearImageCache()
