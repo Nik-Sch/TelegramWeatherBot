@@ -27,10 +27,6 @@ def e405(_):
 def e500(_):
     return make_response(jsonify({'status': 500}), 500)
 
-
-def saveFile(jpg: Any, imagePath: str, thumbPath: str):
-    logging.log(msg=f"thread image: {imagePath}", level=30)
-
 @app.route('/animation', methods=['POST'])
 def postAnimation() -> Response:
     if socket.gethostbyname('bot') != request.remote_addr:
@@ -98,7 +94,7 @@ def postImage() -> Response:
             response.autocorrect_location_header = False
             return response
         except IOError as e:
-            logging.log(msg=e, level=40)
+            logging.error(e, exc_info=True)
             return make_response(jsonify({'error': "Cannot parse as image", 'status': 400}), 400)
     return make_response(jsonify({'error': "No image found", 'status': 400}), 400)
 
