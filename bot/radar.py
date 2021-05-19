@@ -110,12 +110,9 @@ class Radar:
             allImages.append(currentImage.convert('RGB'))
         mapImage.close()
 
-        f = tempfile.NamedTemporaryFile(suffix='.mp4').name
-        imageio.mimsave(f, allImages, 'mp4',  fps=1)
-        with open(f, 'rb') as fh:
-            buffer = io.BytesIO(fh.read())
-            os.remove(f)
-            return buffer
+        buffer = io.BytesIO()
+        imageio.mimsave(buffer, allImages, 'mp4',  fps=1, output_params=["-f", "mp4"])
+        return buffer
 
 
 if __name__ == "__main__":

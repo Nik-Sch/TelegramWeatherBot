@@ -148,6 +148,7 @@ class QueueElement:
     width: int
     text: str
     title: str
+    current_temp: Optional[float]
 
 
 def queueImage(param: QueryParameter):
@@ -168,6 +169,7 @@ def queueImage(param: QueryParameter):
                 width=imageResult['width'],
                 text=text,
                 title=imageResult['weather_station'],
+                current_temp=imageResult['current_temp']
             )
         )
 
@@ -190,6 +192,7 @@ def queueRadar(param: QueryParameter):
             width=512,
             text=text,
             title=locationName,
+            current_temp=None
         )
     )
 
@@ -302,12 +305,12 @@ class MainBot:
                     logging.info(f"dequeue {elem.type}: {elem}")
                     if elem.type == 'photo':
                         if first:
-                            album.append(InputMediaPhoto(elem.url, caption=f"Weather for {location['name']}"))
+                            album.append(InputMediaPhoto(elem.url, caption=f"Weather for {location['name']}. ({elem.current_temp}°C currently)"))
                             first = False
                         else:
                             album.append(InputMediaPhoto(elem.url))
                     else:
-                        context.bot.send_animation(chat_id, animation=elem.url, caption=f"Radar for {location['name']}")
+                        context.bot.send_animation(chat_id, animation=elem.url, caption=f"Radar for {location['name']}.")
                 context.bot.send_media_group(chat_id, album)
             finally:
                 context.bot.delete_message(chat_id=chat_id, message_id=waitingMessage.message_id)
@@ -652,19 +655,25 @@ if __name__ == '__main__':
 
     logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
                         level=logging.INFO)
-    dispatcher.add_handler(CommandHandler('start', bot.start, run_async=True))
-    dispatcher.add_handler(CommandHandler('add', bot.add, run_async=True))
-    dispatcher.add_handler(CommandHandler('getAll', bot.getAll, run_async=True))
-    dispatcher.add_handler(CommandHandler('get', bot.getForecast, run_async=True))
-    dispatcher.add_handler(CommandHandler('getDetailed', bot.getDetailedForecast, run_async=True))
-    dispatcher.add_handler(CommandHandler('radar', bot.getRadar, run_async=True))
-    dispatcher.add_handler(CommandHandler('rename', bot.rename, run_async=True))
-    dispatcher.add_handler(CommandHandler('delete', bot.delete, run_async=True))
-    dispatcher.add_handler(CommandHandler('remove', bot.delete, run_async=True))
+
+    commands = [
+        ['start', bot.start, 'Send the description text'],
+        ['add', bot.add, 'Add a new weather station'],
+        ['getall', bot.getAll, 'get the full forecast for all locations you added'],
+        ['get', bot.getForecast, 'get the full forecast for a location'],
+        ['getdetailed', bot.getDetailedForecast, 'get a detailed forecast for a location for the next day'],
+        ['radar', bot.getRadar, 'get a rain radar'],
+        ['rename', bot.rename, 'rename a weather station'],
+        ['delete', bot.delete, 'delete a station'],
+        ['remove', bot.delete, 'delete a station'],
+    ]
+    for name, fun, _ in commands:
+        dispatcher.add_handler(CommandHandler(name, fun, run_async=True))
     dispatcher.add_handler(MessageHandler(Filters.location, bot.handleLocation, run_async=True))
     dispatcher.add_handler(MessageHandler(Filters.text, bot.handleText, run_async=True))
     dispatcher.add_handler(InlineQueryHandler(bot.handleInlineQuery, run_async=True))
     dispatcher.add_error_handler(bot.handleError)
+    updater.bot.set_my_commands([(name, desc) for name, _, desc in commands])
 
     clearImageCache()
 
