@@ -3,4 +3,4 @@ r = robjects.r
 r['source']('plot.r')
 plotFun = robjects.globalenv['plot']
 
-plotFun('data.json', 'image.jpg')
+plotFun('data.json', 'image.jpg', False)

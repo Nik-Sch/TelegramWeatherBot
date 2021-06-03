@@ -4,7 +4,7 @@ library(quantmod)
 library(wesanderson)
 library(gridExtra)
 
-plot <- function(inputFile, outputFile) {
+plot <- function(inputFile, outputFile, tenDays) {
     forecast <- fromJSON(file = inputFile)
 
     customTheme <- (
@@ -19,8 +19,8 @@ plot <- function(inputFile, outputFile) {
             )
 
     xScale <- scale_x_datetime(
-        date_breaks='5 hour',
-        date_labels='%a %H:%M')
+        date_breaks=( if (tenDays) '1 day' else '5 hour'),
+        date_labels=(if (tenDays) '%a %d.%m.' else '%a %H:%M'))
 
     asDate <- function(s) {
         return(as.POSIXct(sub("(.*?:.*?):(\\d\\d)", "\\1\\2", s), format="%Y-%m-%dT%H:%M:%S%z"))
@@ -41,12 +41,13 @@ plot <- function(inputFile, outputFile) {
             label=sprintf("%d°C", round(tempsFrame$temps[valleys]))
         )
         palette = pal <- wes_palette("Zissou1", 100, type = "continuous")
+        xNudge <- if (tenDays) 5 * 3600 else 3600
         plotTemps <- ggplot(tempsFrame) +
         geom_point(aes(x=asDate(dates), y=temps, color=temps)) +
         geom_point(aes(x=asDate(dates), y=temps), peakFrame, color='#C23030') +
-        geom_text(aes(x=asDate(dates), y=temps, label=label), peakFrame, color='#C23030', nudge_x=0.02, nudge_y=0.5) +
+        geom_text(aes(x=asDate(dates), y=temps, label=label), peakFrame, color='#C23030', nudge_x=xNudge, nudge_y=1) +
         geom_point(aes(x=asDate(dates), y=temps), valleyFrame, color='#106BA3') +
-        geom_text(aes(x=asDate(dates), y=temps, label=label), valleyFrame, color='#106BA3', nudge_x=0.02, nudge_y=-0.5) +
+        geom_text(aes(x=asDate(dates), y=temps, label=label), valleyFrame, color='#106BA3', nudge_x=xNudge, nudge_y=-1) +
         ylab('Temperature (°C)') +
         xScale +
         guides(color=FALSE) +
@@ -62,7 +63,7 @@ plot <- function(inputFile, outputFile) {
         amountCoefficient <- amountLimit / 100
 
         plotRain <- ggplot() +
-        geom_bar(aes(x=asDate(dates), y=percentage, fill=amount), rainfallProb, position='stack', stat='identity') +
+        geom_bar(aes(x=asDate(dates), y=percentage, fill=amount), rainfallProb, position='stack', stat='identity', width=3600) +
         geom_line(aes(x=asDate(dates), y=amount / amountCoefficient), rainfallAmount, color='#8043cc') +
         scale_y_continuous(
             name='Rain probability (%)',
@@ -85,11 +86,19 @@ plot <- function(inputFile, outputFile) {
 
         plotSun <- ggplot(sunFrame) +
             geom_bar(aes(x=asDate(dates), y=sunshine), stat='identity', fill='#D9822B') +
-            ylim(0, 60) +
-            ylab('Sunshine (minutes)') +
+            ylab(if (tenDays) 'Sunshine (hours)' else 'Sunshine (minutes)') +
             xScale +
             guides(color=FALSE) +
             customTheme
+        if (tenDays) {
+            plotSun <- plotSun +
+                geom_text(aes(x=asDate(dates), y=asDate(sunshine), label=asDate(label)), color='#D9822B', nudge_y=1) +
+                ylim(0, max(max(sunFrame$sunshine) + 1, 10))
+
+        } else {
+            plotSun <- plotSun +
+                ylim(0, 60)
+        }
     }
 
     if (!is.null(plotTemps) && !is.null(plotRain) && !is.null(plotSun)) {
@@ -99,3 +108,5 @@ plot <- function(inputFile, outputFile) {
         print('not all plots')
     }
 }
+
+# plot('data.json', 'image.jpg', TRUE)
