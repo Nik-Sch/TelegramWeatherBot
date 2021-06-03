@@ -4,8 +4,7 @@ import time
 from typing import List, Tuple, TypedDict, cast
 from requests.models import Response
 from PIL import Image, ImageDraw, ImageFont
-import tempfile
-import os
+import logging
 from requests_cache.session import CachedSession
 import staticmaps
 import imageio
@@ -17,7 +16,7 @@ from backend import getRequestsCache
 
 
 def printTime(s: str, t1: float, t2: float):
-    # print(f"{s}: {(t2 - t1) * 1000}ms")
+    logging.info(f"{s}: {(t2 - t1) * 1000}ms")
     pass
 
 
@@ -96,15 +95,15 @@ class Radar:
         radars = self.getRainViewerUrls(lat, lon)
         i = 0
         for radarUrl, timestamp in radars:
-            t1 = time.perf_counter()
+            # t1 = time.perf_counter()
             currentImage = mapImage.copy()
             response = self.requestsSession.get(radarUrl)
             with Image.open(io.BytesIO(response.content)) as overlay:
                 currentImage.paste(overlay, (0, 0), overlay)
             self.addTimeToImage(currentImage, timestamp)
             self.addMarkerToImage(currentImage)
-            t2 = time.perf_counter()
-            printTime(f'{i}', t1, t2)
+            # t2 = time.perf_counter()
+            # printTime(f'{i}', t1, t2)
             i += 1
 
             allImages.append(currentImage.convert('RGB'))

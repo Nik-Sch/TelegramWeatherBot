@@ -19,11 +19,11 @@ plot <- function(inputFile, outputFile, tenDays) {
             )
 
     xScale <- scale_x_datetime(
-        date_breaks=( if (tenDays) '1 day' else '5 hour'),
-        date_labels=(if (tenDays) '%a %d.%m.' else '%a %H:%M'))
+        date_breaks=if (tenDays) '1 day' else '5 hour',
+        date_labels=if (tenDays) '%a %d.%m.' else '%a %H:%M')
 
     asDate <- function(s) {
-        return(as.POSIXct(sub("(.*?:.*?):(\\d\\d)", "\\1\\2", s), format="%Y-%m-%dT%H:%M:%S%z"))
+        return(as.POSIXct(s, format="%Y-%m-%dT%H:%M:%S%z"))
     }
 
     if (!is.null(forecast$temps)) {
@@ -68,7 +68,7 @@ plot <- function(inputFile, outputFile, tenDays) {
         scale_y_continuous(
             name='Rain probability (%)',
             limits=c(0, 100),
-            sec.axis=sec_axis(~.*amountCoefficient, name='Rain in mm')
+            sec.axis=sec_axis(~.*amountCoefficient, name='Rain in mm/hour')
         ) +
         scale_fill_gradient(low='#84bcdb', high='#084285') +
         xScale +
@@ -92,7 +92,7 @@ plot <- function(inputFile, outputFile, tenDays) {
             customTheme
         if (tenDays) {
             plotSun <- plotSun +
-                geom_text(aes(x=asDate(dates), y=asDate(sunshine), label=asDate(label)), color='#D9822B', nudge_y=1) +
+                geom_text(aes(x=asDate(dates), y=sunshine, label=label), color='#D9822B', nudge_y=1) +
                 ylim(0, max(max(sunFrame$sunshine) + 1, 10))
 
         } else {
@@ -103,7 +103,7 @@ plot <- function(inputFile, outputFile, tenDays) {
 
     if (!is.null(plotTemps) && !is.null(plotRain) && !is.null(plotSun)) {
         g <- grid.arrange(plotTemps, plotRain, plotSun, ncol=1)
-        ggsave(file=outputFile, g)
+        ggsave(file=outputFile, g, width=10, height=10)
     } else {
         print('not all plots')
     }
