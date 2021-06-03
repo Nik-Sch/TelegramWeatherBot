@@ -1,8 +1,14 @@
 library(ggplot2)
 library(rjson)
-library(quantmod)
 library(wesanderson)
 library(gridExtra)
+
+findPeaks <- function(data) {
+    return(which(diff(diff(data)>=0)<0) + 1)
+}
+findValleys <- function(data) {
+    return(which(diff(diff(data)>=0)>0) + 1)
+}
 
 plot <- function(inputFile, outputFile, tenDays) {
     forecast <- fromJSON(file = inputFile)
@@ -28,13 +34,13 @@ plot <- function(inputFile, outputFile, tenDays) {
 
     if (!is.null(forecast$temps)) {
         tempsFrame <- as.data.frame(forecast$temps)
-        peaks <- findPeaks(tempsFrame$temps, 0) - 1
+        peaks <- findPeaks(tempsFrame$temps)
         peakFrame <- data.frame(
             temps=tempsFrame$temps[peaks],
             dates=tempsFrame$dates[peaks],
             label=sprintf("%d°C", round(tempsFrame$temps[peaks]))
         )
-        valleys <- findValleys(tempsFrame$temps, 0) - 1
+        valleys <- findValleys(tempsFrame$temps)
         valleyFrame <- data.frame(
             temps=tempsFrame$temps[valleys],
             dates=tempsFrame$dates[valleys],
@@ -109,4 +115,4 @@ plot <- function(inputFile, outputFile, tenDays) {
     }
 }
 
-# plot('data.json', 'image.jpg', TRUE)
+plot('data.json', 'image.jpg', TRUE)
