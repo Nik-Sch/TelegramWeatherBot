@@ -3,11 +3,19 @@ library(rjson)
 library(wesanderson)
 library(gridExtra)
 
+findExtrema <- function(data, regex, offset) {
+    xc <- paste(as.character(sign(diff(data))), collapse="")
+    xc <- gsub("1", "+", gsub("-1", "-", xc))
+    res <- gregexpr(regex, xc)[[1]] + offset
+    attributes(res) <- NULL
+    return(res)
+}
+
 findPeaks <- function(data) {
-    return(which(diff(diff(data)>=0)<0) + 1)
+    return(findExtrema(data, "[+]{2}.{4}[-]{2}", 6))
 }
 findValleys <- function(data) {
-    return(which(diff(diff(data)>=0)>0) + 1)
+    return(findExtrema(data, "[-]{2}.{4}[+]{2}", 6))
 }
 
 plot <- function(inputFile, outputFile, tenDays) {
