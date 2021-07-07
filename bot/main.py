@@ -314,6 +314,20 @@ class MainBot:
         for location in locations:
             self.sendAllForLocation(context, chat_id, location)
 
+    def setDefault(self, update: Update, context: CallbackContext):
+        chat_id, message =  self.getStuff(update)
+        locations = list(self.db.getLocations(chat_id))
+        self.db.setState(chat_id, State('set_default'))
+        message.reply_text("Which location should be the new default location?", reply_markup=self.locationReplyKeyboard(locations))
+
+    def getDefault(self, update: Update, context: CallbackContext):
+        chat_id, message =  self.getStuff(update)
+        location = self.db.getDefaultLocation(chat_id)
+        if location == None:
+            message.reply_text("You need to set a default location with /setdefault.")
+            return
+        self.sendAllForLocation(context, chat_id, location)
+
     def locationReplyKeyboard(self, locations: List[Location]) -> ReplyKeyboardMarkup:
         locationNames = list(map(lambda x: x.name, locations))
 
@@ -492,6 +506,16 @@ class MainBot:
                 context.bot.send_message(chat_id,
                                          text="I couldn't find a location.",
                                          reply_markup=ReplyKeyboardRemove())
+        elif state.type == 'set_default':
+            locations = db.getLocations(chat_id)
+            selectedLocation = next(filter(lambda x: x.name == message.text, locations), None)
+            if selectedLocation != None:
+                self.db.setDefaultLocation(chat_id, selectedLocation)
+                message.reply_text(
+                    f"Updated the default location to {selectedLocation.name}", reply_markup=ReplyKeyboardRemove())
+            else:
+                context.bot.send_message(
+                    chat_id, text="Invalid station name.", reply_markup=ReplyKeyboardRemove())
 
     def rename(self, update: Update, context: CallbackContext):
         chat_id, message = self.getStuff(update)
@@ -659,6 +683,8 @@ if __name__ == '__main__':
         ['getall', bot.getAll, 'get the full forecast for all locations you added'],
         ['get', bot.getForecast, 'get the full forecast for a location'],
         ['getdetailed', bot.getDetailedForecast, 'get a detailed forecast for a location for the next day'],
+        ['getdefault', bot.getDefault, 'get the full forecast for the default location'],
+        ['setdefault', bot.setDefault, 'set the default location'],
         ['radar', bot.getRadar, 'get a rain radar'],
         ['rename', bot.rename, 'rename a weather station'],
         ['delete', bot.delete, 'delete a station'],

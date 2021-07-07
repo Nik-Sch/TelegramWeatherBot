@@ -11,16 +11,17 @@ class Location:
     lat: float
     lon: float
     name: str
+    default: bool = False
 
     @staticmethod
     def fromDict(d: Dict):
-        return Location(d['lat'], d['lon'], d['name'])
+        return Location(d['lat'], d['lon'], d['name'], d.get('default', False))
     
     def toDict(self):
         return asdict(self)
 
 
-StateType = Literal['idle', 'get', 'getTenDays', 'getRadar', 'add', 'rename', 'remove']
+StateType = Literal['idle', 'get', 'getTenDays', 'getRadar', 'add', 'rename', 'remove', 'set_default']
 
 @dataclass
 class State:
@@ -80,6 +81,23 @@ class Backend():
         cursor = self.db.locations.find({'chat': chat_id})
         for elem in cursor:
             yield Location.fromDict(elem['location'])
+
+    def getDefaultLocation(self, chat_id: str) -> Optional[Location]:
+        for location in self.getLocations(chat_id):
+            if location.default:
+                return location
+        return None
+
+    def setDefaultLocation(self, chat_id: str, location: Location):
+        self.db.locations.update_many({
+            'chat': chat_id,
+            'location.default': True
+        }, {'$set': {'location.default': False}})
+        self.db.locations.update_one({
+            'chat': chat_id,
+            'location.lat': location.lat,
+            'location.lon': location.lon
+        }, {'$set': {'location.default': True}})
 
     def renameLocation(self, chat_id: str, location: Location, newName: str):
         self.db.locations.find_one_and_update({
