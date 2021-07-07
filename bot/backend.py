@@ -21,7 +21,7 @@ class Location:
         return asdict(self)
 
 
-StateType = Literal['idle', 'get', 'getTenDays', 'getRadar', 'add', 'rename', 'remove', 'set_default']
+StateType = Literal['idle', 'get', 'getRadar', 'add', 'rename', 'remove', 'set_default']
 
 @dataclass
 class State:

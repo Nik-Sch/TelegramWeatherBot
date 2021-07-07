@@ -377,9 +377,6 @@ class MainBot:
                               location.lat, location.lon, tenDays=what == 'getTenDays', name=location.name)
 
     def getForecast(self, update: Update, context: CallbackContext):
-        self.getWrapper(update, context, 'getTenDays')
-
-    def getDetailedForecast(self, update: Update, context: CallbackContext):
         self.getWrapper(update, context, 'get')
 
     def getRadar(self, update: Update, context: CallbackContext):
@@ -418,7 +415,7 @@ class MainBot:
         state = db.getState(chat_id)
         db.setState(chat_id, State('idle'))
 
-        if state.type == 'get' or state.type == 'getTenDays' or state.type == 'getRadar':
+        if state.type == 'get' or state.type == 'getRadar':
             if state.addLocations is not None:
                 logging.info(message.text)
                 logging.info(state.addLocations)
@@ -435,7 +432,7 @@ class MainBot:
                     if state.type == 'getRadar':
                         self.sendRadar(chat_id, context.bot, selectedLocation.lat, selectedLocation.lon)
                     else:
-                        self.sendForecast(chat_id, context.bot, selectedLocation.lat, selectedLocation.lon, state.type == 'getTenDays')
+                        self.sendAllForLocation(context, chat_id, selectedLocation)
                 else:
                     context.bot.send_message(
                         chat_id, text="Invalid station name.", reply_markup=ReplyKeyboardRemove())
@@ -682,13 +679,11 @@ if __name__ == '__main__':
         ['add', bot.add, 'Add a new weather station'],
         ['getall', bot.getAll, 'get the full forecast for all locations you added'],
         ['get', bot.getForecast, 'get the full forecast for a location'],
-        ['getdetailed', bot.getDetailedForecast, 'get a detailed forecast for a location for the next day'],
         ['getdefault', bot.getDefault, 'get the full forecast for the default location'],
         ['setdefault', bot.setDefault, 'set the default location'],
         ['radar', bot.getRadar, 'get a rain radar'],
         ['rename', bot.rename, 'rename a weather station'],
         ['delete', bot.delete, 'delete a station'],
-        ['remove', bot.delete, 'delete a station'],
     ]
     for name, fun, _ in commands:
         dispatcher.add_handler(CommandHandler(name, fun, run_async=True))
