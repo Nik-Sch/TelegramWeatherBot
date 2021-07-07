@@ -18,7 +18,7 @@ from telegram import (Bot,
                       )
 import os
 import logging
-from typing import (Any, Dict, Literal, Optional, Union,
+from typing import (Any, ContextManager, Dict, Literal, Optional, Union,
                     List,
                     Tuple,
                     TypedDict,
@@ -29,7 +29,7 @@ from telegram.inline.inlinequeryresultphoto import InlineQueryResultPhoto
 from telegram.inline.inlinequeryresultmpeg4gif import InlineQueryResultMpeg4Gif
 from telegram.message import Message
 from telegram.utils.types import JSONDict
-from backend import Backend, Location, StateType, getRequestsCache
+from backend import Backend, Location, State, StateType, getRequestsCache
 from radar import Radar, printTime
 from weatherProvider import WeatherProvider
 import threading
@@ -152,7 +152,7 @@ class QueueElement:
 
 
 def queueImage(param: QueryParameter):
-    imageResult = getImage(param.location['lat'], param.location['lon'], param.type == 'plotTenDays')
+    imageResult = getImage(param.location.lat, param.location.lon, param.type == 'plotTenDays')
     if imageResult != None:
         logging.info(f"queueing {imageResult['imageId']}.")
         if param.query == None:
@@ -175,8 +175,8 @@ def queueImage(param: QueryParameter):
 
 
 def queueRadar(param: QueryParameter):
-    radarId, link = getRadarAnimation(param.location['lat'], param.location['lon'])
-    locationName = getLocationName(param.location['lat'], param.location['lon'])
+    radarId, link = getRadarAnimation(param.location.lat, param.location.lon)
+    locationName = getLocationName(param.location.lat, param.location.lon)
     logging.info(f"queueing radar {radarId}.")
     if param.query == None:
         text = f"Radar for {locationName}."
@@ -265,22 +265,43 @@ class MainBot:
             message = update.message
         return (update.effective_chat.id, message)
 
-    def addLocation(self, chat_id: str, bot: Bot, lat: float, lon: float):
+    def addLocation(self, chat_id: str, context: CallbackContext, lat: float, lon: float):
         info = WeatherProvider().getLocationInfo(lat, lon)
         if info == None:
-            bot.send_message(chat_id, f"I couldn't find a weather station near the location. 😔")
+            context.bot.send_message(chat_id, f"I couldn't find a weather station near the location. 😔")
             return
         name, dist = info
-        if db.addLocation(chat_id, {
-            'name': name,
-            'lat': lat,
-            'lon': lon
-        }):
-            bot.send_message(
+        if db.addLocation(chat_id, Location(lat, lon, name)):
+            context.bot.send_message(
                 chat_id, f"Station '{name}' ({dist}km from location) added.\nIt will be included in /getall and you can get it individually by '/get {name}'.")
-            self.sendForecast(chat_id, bot, lat, lon, True)
+            self.sendAllForLocation(context, chat_id, Location(lat, lon, name))
         else:
-            bot.send_message(chat_id, f"Station '{name}' is already added.")
+            context.bot.send_message(chat_id, f"Station '{name}' is already added.")
+
+    def sendAllForLocation(self, context: CallbackContext, chat_id: str, location: Location):
+        waitingMessage = context.bot.send_message(chat_id, text="⏳", reply_markup=ReplyKeyboardRemove())
+        try:
+            album: List[InputMedia] = []
+            params = map(lambda t: QueryParameter(location, None, t), ['plot', 'plotTenDays', 'radar'])  # type: ignore
+            queue: Queue[QueueElement] = Queue()
+            with Pool(3, setQueueForProcess, [queue]) as pool:
+                pool.map(createResults, params)
+
+            first = True
+            while not queue.empty():
+                elem = queue.get_nowait()
+                logging.info(f"dequeue {elem.type}: {elem}")
+                if elem.type == 'photo':
+                    if first:
+                        album.append(InputMediaPhoto(elem.url, caption=f"Weather for {location.name}. ({elem.current_temp}°C currently)"))
+                        first = False
+                    else:
+                        album.append(InputMediaPhoto(elem.url))
+                else:
+                    context.bot.send_animation(chat_id, animation=elem.url, caption=f"Radar for {location.name}.")
+            context.bot.send_media_group(chat_id, album)
+        finally:
+            context.bot.delete_message(chat_id=chat_id, message_id=waitingMessage.message_id)
 
     def getAll(self, update: Update, context: CallbackContext):
         chat_id, _ = self.getStuff(update)
@@ -291,32 +312,10 @@ class MainBot:
             return
 
         for location in locations:
-            waitingMessage = context.bot.send_message(chat_id, text="⏳", reply_markup=ReplyKeyboardRemove())
-            try:
-                album: List[InputMedia] = []
-                params = map(lambda t: QueryParameter(location, None, t), ['plot', 'plotTenDays', 'radar'])  # type: ignore
-                queue: Queue[QueueElement] = Queue()
-                with Pool(3, setQueueForProcess, [queue]) as pool:
-                    pool.map(createResults, params)
-
-                first = True
-                while not queue.empty():
-                    elem = queue.get_nowait()
-                    logging.info(f"dequeue {elem.type}: {elem}")
-                    if elem.type == 'photo':
-                        if first:
-                            album.append(InputMediaPhoto(elem.url, caption=f"Weather for {location['name']}. ({elem.current_temp}°C currently)"))
-                            first = False
-                        else:
-                            album.append(InputMediaPhoto(elem.url))
-                    else:
-                        context.bot.send_animation(chat_id, animation=elem.url, caption=f"Radar for {location['name']}.")
-                context.bot.send_media_group(chat_id, album)
-            finally:
-                context.bot.delete_message(chat_id=chat_id, message_id=waitingMessage.message_id)
+            self.sendAllForLocation(context, chat_id, location)
 
     def locationReplyKeyboard(self, locations: List[Location]) -> ReplyKeyboardMarkup:
-        locationNames = list(map(lambda x: x['name'], locations))
+        locationNames = list(map(lambda x: x.name, locations))
 
         keyboard = []
         i = 0
@@ -335,10 +334,19 @@ class MainBot:
             context.bot.send_message(
                 chat_id, text=f"You need to add a location with /add.")
             return
+        
+        if len(locations) == 1:
+            location = locations[0]
+            if what == 'getRadar':
+                self.sendRadar(chat_id, context.bot, location.lat, location.lon)
+            else:
+                self.sendForecast(chat_id, context.bot,
+                                location.lat, location.lon, tenDays=what == 'getTenDays', name=location.name)
+            return
 
-        locationNames = list(map(lambda x: x['name'], locations))
+        locationNames = list(map(lambda x: x.name, locations))
         if context.args != None and len(context.args) == 0:
-            db.setState(chat_id, {'type': what})
+            db.setState(chat_id, State(what))
             message.reply_text(
                 'Choose a station.', reply_markup=self.locationReplyKeyboard(locations))
             return
@@ -347,12 +355,12 @@ class MainBot:
             context.bot.send_message(
                 chat_id, text=f"You have not added {context.args[0]}.\n You have added {', '.join(locationNames)}.")
             return
-        location = next(filter(lambda x: x['name'] == context.args[0], locations), None)
+        location = next(filter(lambda x: x.name == context.args[0], locations), None)
         if what == 'getRadar':
-            self.sendRadar(chat_id, context.bot, location['lat'], location['lon'])
+            self.sendRadar(chat_id, context.bot, location.lat, location.lon)
         else:
             self.sendForecast(chat_id, context.bot,
-                              location['lat'], location['lon'], tenDays=what == 'getTenDays', name=location['name'])
+                              location.lat, location.lon, tenDays=what == 'getTenDays', name=location.name)
 
     def getForecast(self, update: Update, context: CallbackContext):
         self.getWrapper(update, context, 'getTenDays')
@@ -370,7 +378,7 @@ class MainBot:
             context.bot.send_message(
                 chat_id, text=f"You need to add a location with /add.")
             return
-        db.setState(chat_id, {'type': 'remove'})
+        db.setState(chat_id, State('remove'))
         message.reply_text(
             'Which station should be removed?', reply_markup=self.locationReplyKeyboard(locations))
         return
@@ -380,96 +388,92 @@ class MainBot:
         lat = message.location.latitude
         lon = message.location.longitude
         if db.getState(chat_id)['type'] == 'add':  # type: ignore
-            self.addLocation(chat_id, context.bot, lat, lon)
-            db.setState(chat_id, {'type': 'idle'})
+            self.addLocation(chat_id, context, lat, lon)
+            db.setState(chat_id, State('idle'))
         else:
-            self.sendForecast(chat_id, context.bot, lat, lon, True)
+            location = Location(lat, lon, getLocationName(lat, lon))
+            self.sendAllForLocation(context, chat_id, location)
 
     def add(self, update: Update, context: CallbackContext):
         chat_id, _ = self.getStuff(update)
-        db.setState(chat_id, {'type': 'add'})
+        db.setState(chat_id, State('add'))
         context.bot.send_message(chat_id, text="Ok, now send a location.")
 
     def handleText(self, update: Update, context: CallbackContext):
         chat_id, message = self.getStuff(update)
         state = db.getState(chat_id)
-        db.setState(chat_id, {'type': 'idle'})
-        if 'type' not in state:
-            raise ValueError('type is not in state')
+        db.setState(chat_id, State('idle'))
 
-        if state['type'] == 'get' or state['type'] == 'getTenDays' or state['type'] == 'getRadar':
-            if 'addLocations' in state:
-                selectedLocation = next(filter(lambda l: l['name'] == message.text, state['addLocations']), None)
+        if state.type == 'get' or state.type == 'getTenDays' or state.type == 'getRadar':
+            if state.addLocations is not None:
+                logging.info(message.text)
+                logging.info(state.addLocations)
+                selectedLocation = next(filter(lambda l: l.name == message.text, state.addLocations), None)
                 if selectedLocation != None:
-                    # type will always be 'get' and send both
-                    self.sendRadar(chat_id, context.bot, selectedLocation['lat'], selectedLocation['lon'])
-                    self.sendForecast(chat_id, context.bot, selectedLocation['lat'], selectedLocation['lon'], True)
+                    self.sendAllForLocation(context, chat_id, selectedLocation)
                 else:
                     context.bot.send_message(chat_id, text="Invalid location selected.", reply_markup=ReplyKeyboardRemove())
-                db.setState(chat_id, {'type': 'idle'})
+                db.setState(chat_id, State('idle'))
             else:
                 locations = db.getLocations(chat_id)
-                selectedLocation = next(filter(lambda x: x['name'] == message.text, locations), None)
+                selectedLocation = next(filter(lambda x: x.name == message.text, locations), None)
                 if selectedLocation != None:
-                    if state['type'] == 'getRadar':
-                        self.sendRadar(chat_id, context.bot, selectedLocation['lat'], selectedLocation['lon'])
+                    if state.type == 'getRadar':
+                        self.sendRadar(chat_id, context.bot, selectedLocation.lat, selectedLocation.lon)
                     else:
-                        self.sendForecast(chat_id, context.bot, selectedLocation['lat'], selectedLocation['lon'], state['type'] == 'getTenDays')
+                        self.sendForecast(chat_id, context.bot, selectedLocation.lat, selectedLocation.lon, state.type == 'getTenDays')
                 else:
                     context.bot.send_message(
                         chat_id, text="Invalid station name.", reply_markup=ReplyKeyboardRemove())
 
-        elif state['type'] == 'rename':
+        elif state.type == 'rename':
             locations = db.getLocations(chat_id)
 
             # new name
-            if 'location' in state:
-                location = next(filter(lambda x: x['name'] == state['location']['name'], locations), None)  # type: ignore
+            if state.location is not None:
+                location = next(filter(lambda x: x.name == state.location.name, locations), None)  # type: ignore
                 if location != None:
                     db.renameLocation(chat_id, location, message.text)
                     context.bot.send_message(
-                        chat_id, f"'{state['location']['name']}' was renamed to '{message.text}'")
+                        chat_id, f"'{state.location.name}' was renamed to '{message.text}'")
                 else:
                     context.bot.send_message(
                         chat_id, text="Invalid station name.", reply_markup=ReplyKeyboardRemove())
                 return
 
             location = next(
-                filter(lambda x: x['name'] == message.text, locations), None)
+                filter(lambda x: x.name == message.text, locations), None)
             if location != None:
-                db.setState(chat_id, {'type': 'rename', 'location': location})
+                db.setState(chat_id, State('rename', location=location))
                 context.bot.send_message(
                     chat_id, text="Ok. What is the new name?", reply_markup=ReplyKeyboardRemove())
             else:
                 context.bot.send_message(
                     chat_id, text="Invalid station name.", reply_markup=ReplyKeyboardRemove())
 
-        elif state['type'] == 'remove':
+        elif state.type == 'remove':
             locations = db.getLocations(chat_id)
-            location = next(filter(lambda x: x['name'] == message.text, locations), None)
+            location = next(filter(lambda x: x.name == message.text, locations), None)
             if location != None:
                 db.removeLocation(chat_id, location)
                 context.bot.send_message(
-                    chat_id, text=f"{location['name']} successfully removed.", reply_markup=ReplyKeyboardRemove())
+                    chat_id, text=f"{location.name} successfully removed.", reply_markup=ReplyKeyboardRemove())
             else:
                 context.bot.send_message(
                     chat_id, text="Invalid station name.", reply_markup=ReplyKeyboardRemove())
 
-        elif state['type'] == 'add':
-            if 'addLocations' in state:
-                selectedLocation = next(filter(lambda l: l['name'] == message.text, state['addLocations']), None)
+        elif state.type == 'add':
+            if state.addLocations is not None:
+                selectedLocation = next(filter(lambda l: l.name == message.text, state.addLocations), None)
                 if selectedLocation != None:
-                    self.addLocation(chat_id, context.bot, selectedLocation['lat'], selectedLocation['lon'])
+                    self.addLocation(chat_id, context, selectedLocation.lat, selectedLocation.lon)
                 else:
                     context.bot.send_message(chat_id, text="Invalid location selected.", reply_markup=ReplyKeyboardRemove())
-                db.setState(chat_id, {'type': 'idle'})
+                db.setState(chat_id, State('idle'))
             else:
                 addLocations = self.queryLocations(message.text)
                 if len(addLocations) > 0:
-                    db.setState(chat_id, {
-                        'type': 'add',
-                        'addLocations': addLocations
-                    })
+                    db.setState(chat_id, State('add', addLocations=addLocations))
                     context.bot.send_message(chat_id,
                                              text="I have found these locations matching. Choose one:",
                                              reply_markup=self.locationReplyKeyboard(addLocations))
@@ -477,13 +481,10 @@ class MainBot:
                     context.bot.send_message(chat_id,
                                              text="I couldn't find a location.",
                                              reply_markup=ReplyKeyboardRemove())
-        elif state['type'] == 'idle' and message.chat.type == 'private':
+        elif state.type == 'idle' and message.chat.type == 'private':
             addLocations = self.queryLocations(message.text)
             if len(addLocations) > 0:
-                db.setState(chat_id, {
-                    'type': 'get',
-                    'addLocations': addLocations
-                })
+                db.setState(chat_id, State('get', addLocations=addLocations))
                 context.bot.send_message(chat_id,
                                          text="I have found these locations matching. Choose one:",
                                          reply_markup=self.locationReplyKeyboard(addLocations))
@@ -494,7 +495,7 @@ class MainBot:
 
     def rename(self, update: Update, context: CallbackContext):
         chat_id, message = self.getStuff(update)
-        db.setState(chat_id, {'type': 'rename'})
+        db.setState(chat_id, State('rename'))
 
         locations = list(db.getLocations(chat_id))
         if len(locations) == 0:
@@ -506,11 +507,7 @@ class MainBot:
             'Choose a station to rename.', reply_markup=self.locationReplyKeyboard(locations))
 
     def osmToLocation(self, element: Any) -> Location:
-        return {
-            'lat': element['lat'],
-            'lon': element['lon'],
-            'name': element['display_name']
-        }
+        return Location(element['lat'], element['lon'], element['display_name'])
 
     def queryLocations(self, query: str) -> List[Location]:
         result = db.requestsSession.get(f"https://nominatim.openstreetmap.org/search?q={parse.quote(query, safe='')}&format=jsonv2").json()

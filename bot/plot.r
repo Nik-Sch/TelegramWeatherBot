@@ -115,4 +115,4 @@ plot <- function(inputFile, outputFile, tenDays) {
     }
 }
 
-plot('data.json', 'image.jpg', TRUE)
+# plot('data.json', 'image.jpg', TRUE)

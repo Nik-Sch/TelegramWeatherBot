@@ -1,21 +1,49 @@
-from typing import Iterator, List, Literal, TypedDict
+from dataclasses import asdict, dataclass
+from typing import Dict, Iterator, List, Literal, Optional, TypedDict
 from pymongo import MongoClient
 from pymongo.database import Database
 from requests_cache import CachedSession
 from requests_cache.backends import MongoCache
 import os
 
-class Location(TypedDict):
+@dataclass
+class Location:
     lat: float
     lon: float
     name: str
 
+    @staticmethod
+    def fromDict(d: Dict):
+        return Location(d['lat'], d['lon'], d['name'])
+    
+    def toDict(self):
+        return asdict(self)
+
 
 StateType = Literal['idle', 'get', 'getTenDays', 'getRadar', 'add', 'rename', 'remove']
-class State(TypedDict, total=False):
+
+@dataclass
+class State:
     type: StateType
-    location: Location # NotRequired[Location] doesn't work...
-    addLocations: List[Location] # NotRequired[Location] doesn't work...
+    location: Optional[Location] = None
+    addLocations: Optional[List[Location]] = None
+
+    @staticmethod
+    def fromDict(d: Dict) -> 'State':
+        locationDict = d.get('location', None)
+        addLocationDict = d.get('addLocations', None)
+        location = Location.fromDict(locationDict) if locationDict is not None else None
+        addLocations = [Location.fromDict(l) for l in addLocationDict] if addLocationDict is not None else None
+        return State(d['type'], location, addLocations)
+    
+    def toDict(self):
+        locDict = self.location.toDict() if self.location is not None else None
+        locListDict = [l.toDict() for l in self.addLocations] if self.addLocations is not None else None
+        return {
+            'type': self.type,
+            'location': locDict,
+            'addLocations': locListDict
+        }
 
 def getRequestsCache():
     return CachedSession(cache_name='/cache/http_cache.sqlite')
@@ -34,40 +62,40 @@ class Backend():
     def addLocation(self, chat_id: str, location: Location) -> bool:
         if self.db.locations.count({
             'chat': chat_id,
-            'location.lat': location['lat'],
-            'location.lon': location['lon']
+            'location.lat': location.lat,
+            'location.lon': location.lon,
         }, limit=1) > 0:
           return False
-        self.db.locations.insert_one({'chat': chat_id, 'location': location})
+        self.db.locations.insert_one({'chat': chat_id, 'location': location.toDict()})
         return True
 
     def removeLocation(self, chat_id: str, location: Location):
         self.db.locations.delete_one({
             'chat': chat_id,
-            'location.lat': location['lat'],
-            'location.lon': location['lon']
+            'location.lat': location.lat,
+            'location.lon': location.lon
         })
 
     def getLocations(self, chat_id: str) -> Iterator[Location]:
         cursor = self.db.locations.find({'chat': chat_id})
         for elem in cursor:
-            yield elem['location']
+            yield Location.fromDict(elem['location'])
 
     def renameLocation(self, chat_id: str, location: Location, newName: str):
         self.db.locations.find_one_and_update({
             'chat': chat_id,
-            'location.lat': location['lat'],
-            'location.lon': location['lon']
+            'location.lat': location.lat,
+            'location.lon': location.lon
         }, {'$set': {'location.name': newName}})
 
     def setState(self, chat_id: str, state: State):
         self.db.states.replace_one({'chat': chat_id}, {
             'chat': chat_id,
-            'state': state
+            'state': state.toDict()
         }, upsert=True)
 
     def getState(self, chat_id: str) -> State:
         result = self.db.states.find_one({'chat': chat_id})
         if result == None:
-            return {'type': 'idle'}
-        return result['state']
+            return State('idle')
+        return State.fromDict(result['state'])
