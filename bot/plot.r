@@ -2,6 +2,7 @@ library(ggplot2)
 library(rjson)
 library(wesanderson)
 library(gridExtra)
+library(lubridate)
 
 findExtrema <- function(data, regex, offset) {
     xc <- paste(as.character(sign(diff(data))), collapse="")
@@ -27,18 +28,31 @@ plot <- function(inputFile, outputFile, tenDays) {
                     axis.title.x=element_blank(),
                     legend.position=c(0.8, 0.8),
                     legend.direction='horizontal',
-                    plot.title = element_text(hjust = 0.5)
+                    plot.title = element_text(hjust = 0.5),
+                    panel.grid.minor = element_line(size = 0.5, color = "gray70")
                     # figure.size=c(14, 5),
                 )
             )
 
-    xScale <- scale_x_datetime(
-        date_breaks=if (tenDays) '1 day' else '5 hour',
-        date_labels=if (tenDays) '%a %d.%m.' else '%a %H:%M')
-
     asDate <- function(s) {
         return(as.POSIXct(s, format="%Y-%m-%dT%H:%M:%S%z"))
     }
+
+    asDateHour12 <- function(s) {
+        res <- as.POSIXct(s, format="%Y-%m-%dT%H:%M:%S%z")
+        hour(res) <- 11
+        return(res)
+    }
+
+    minLimit <- asDate(min(forecast$temps$dates))
+    hour(minLimit) <- 0
+    maxLimit <- asDate(max(forecast$temps$dates))
+    hour(minLimit) <- 23
+
+    xScale <- scale_x_datetime(
+        limits = if (tenDays) c(minLimit, maxLimit) else NULL,
+        date_breaks=if (tenDays) '24 hour' else '4 hours',
+        date_labels=if (tenDays) '%a %d.%m.' else '%a %H:%M')
 
     if (!is.null(forecast$temps)) {
         tempsFrame <- as.data.frame(forecast$temps)
@@ -99,14 +113,14 @@ plot <- function(inputFile, outputFile, tenDays) {
         sunFrame <-as.data.frame(forecast$sunshine)
 
         plotSun <- ggplot(sunFrame) +
-            geom_bar(aes(x=asDate(dates), y=sunshine), stat='identity', fill='#D9822B') +
+            geom_bar(aes(x=if (tenDays) asDateHour12(dates) else asDate(dates), y=sunshine), stat='identity', fill='#D9822B') +
             ylab(if (tenDays) 'Sunshine (hours)' else 'Sunshine (minutes)') +
             xScale +
             guides(color=FALSE) +
             customTheme
         if (tenDays) {
             plotSun <- plotSun +
-                geom_text(aes(x=asDate(dates), y=sunshine, label=label), color='#D9822B', nudge_y=1) +
+                geom_text(aes(x=if (tenDays) asDateHour12(dates) else asDate(dates), y=sunshine, label=label), color='#D9822B', nudge_y=1) +
                 ylim(0, max(max(sunFrame$sunshine) + 1, 10))
 
         } else {

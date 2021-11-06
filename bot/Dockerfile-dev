@@ -13,6 +13,7 @@ RUN R -e "install.packages('ggplot2',dependencies=TRUE, repos='https://cloud.r-p
 RUN R -e "install.packages('rjson',dependencies=TRUE, repos='https://cloud.r-project.org/')"
 RUN R -e "install.packages('wesanderson',dependencies=TRUE, repos='https://cloud.r-project.org/')"
 RUN R -e "install.packages('gridExtra',dependencies=TRUE, repos='https://cloud.r-project.org/')"
+RUN R -e "install.packages('lubridate',dependencies=TRUE, repos='https://cloud.r-project.org/')"
 
 COPY ./bot/requirements.txt .
 RUN python -m pip install --no-cache-dir -r requirements.txt
