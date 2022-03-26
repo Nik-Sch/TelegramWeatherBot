@@ -348,7 +348,7 @@ class MainBot:
             context.bot.send_message(
                 chat_id, text=f"You need to add a location with /add.")
             return
-        
+
         if len(locations) == 1:
             location = locations[0]
             if what == 'getRadar':

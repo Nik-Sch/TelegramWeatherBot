@@ -29,7 +29,7 @@ def e500(_):
 
 @app.route('/animation', methods=['POST'])
 def postAnimation() -> Response:
-    if socket.gethostbyname('bot') != request.remote_addr:
+    if socket.gethostbyname('weatherbot') != request.remote_addr:
         return e405(0)
 
     if 'animation' not in request.files:
@@ -59,7 +59,7 @@ def postAnimation() -> Response:
 
 @app.route('/image', methods=['POST'])
 def postImage() -> Response:
-    if socket.gethostbyname('bot') != request.remote_addr:
+    if socket.gethostbyname('weatherbot') != request.remote_addr:
         return e405(0)
 
     if 'image' not in request.files:

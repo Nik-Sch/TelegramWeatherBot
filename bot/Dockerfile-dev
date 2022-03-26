@@ -10,7 +10,7 @@ RUN apt-get update \
   && rm -rf /var/lib/apt/lists/*
 
 RUN R -e "install.packages('ggplot2',dependencies=TRUE, repos='https://cloud.r-project.org/')"
-RUN R -e "install.packages('rjson',dependencies=TRUE, repos='https://cloud.r-project.org/')"
+RUN R -e "install.packages('jsonlite',dependencies=TRUE, repos='https://cloud.r-project.org/')"
 RUN R -e "install.packages('wesanderson',dependencies=TRUE, repos='https://cloud.r-project.org/')"
 RUN R -e "install.packages('gridExtra',dependencies=TRUE, repos='https://cloud.r-project.org/')"
 RUN R -e "install.packages('lubridate',dependencies=TRUE, repos='https://cloud.r-project.org/')"

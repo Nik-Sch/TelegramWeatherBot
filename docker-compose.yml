@@ -14,7 +14,7 @@ services:
     networks:
       - weatherbot
       - brightsky_api
-      - system-proxy_default
+      # - system-proxy_default
 
   image-host:
     build: image-host

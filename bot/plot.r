@@ -1,5 +1,5 @@
 library(ggplot2)
-library(rjson)
+library(jsonlite)
 library(wesanderson)
 library(gridExtra)
 library(lubridate)
@@ -20,7 +20,7 @@ findValleys <- function(data) {
 }
 
 plot <- function(inputFile, outputFile, tenDays) {
-    forecast <- fromJSON(file = inputFile)
+    forecast <- fromJSON(inputFile)
 
     customTheme <- (
                 theme_minimal() +
