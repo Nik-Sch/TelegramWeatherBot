@@ -299,6 +299,7 @@ class MainBot:
                         album.append(InputMediaPhoto(elem.url))
                 else:
                     context.bot.send_animation(chat_id, animation=elem.url, caption=f"Radar for {location.name}.")
+            logging.info(f"album: {album}")
             context.bot.send_media_group(chat_id, album)
         finally:
             context.bot.delete_message(chat_id=chat_id, message_id=waitingMessage.message_id)
@@ -668,7 +669,7 @@ if __name__ == '__main__':
     if HOSTNAME == None:
         raise TypeError('No bot url defined')
 
-    updater = Updater(token=TOKEN, workers=8)
+    updater = Updater(token=TOKEN, workers=2)
     dispatcher = updater.dispatcher
 
     logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
