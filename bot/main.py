@@ -96,6 +96,7 @@ def getLocationName(lat: float, lon: float) -> str:
 def getImage(lat: float, lon: float, tenDays: bool) -> Optional[ImageResult]:
 
     imageResult = WeatherProvider().fetchAndPlot(lat, lon, 10 if tenDays else 1.5)
+    logging.info(f'image result: {imageResult}')
     if imageResult == None:
         return None
 

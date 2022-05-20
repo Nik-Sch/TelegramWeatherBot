@@ -83,30 +83,17 @@ plot <- function(inputFile, outputFile, tenDays) {
         customTheme
     }
 
-    if (!is.null(forecast$rainfallProb)) {
 
-        rainfallProb <- as.data.frame(forecast$rainfallProb)
-        rainfallAmount <- as.data.frame(forecast$rainFallAmount)
-        amountLimit <- max(c(max(rainfallAmount$amount), 2))
-        amountCoefficient <- amountLimit / 100
+    rainfallAmount <- as.data.frame(forecast$rainFallAmount)
+    amountLimit <- max(c(max(rainfallAmount$amount) + 1, 2))
 
-        plotRain <- ggplot() +
-        geom_bar(aes(x=asDate(dates), y=percentage, fill=amount), rainfallProb, position='stack', stat='identity', width=3600) +
-        geom_line(aes(x=asDate(dates), y=amount / amountCoefficient), rainfallAmount, color='#8043cc') +
-        scale_y_continuous(
-            name='Rain probability (%)',
-            limits=c(0, 100),
-            sec.axis=sec_axis(~.*amountCoefficient, name='Rain in mm/hour')
-        ) +
-        scale_fill_gradient(low='#84bcdb', high='#084285') +
-        xScale +
-        guides(fill=guide_colorbar(title='mm', ticks=FALSE)) +
-        customTheme +
-        theme(
-            axis.title.y = element_text(color = '#84bcdb'),
-            axis.title.y.right = element_text(color = '#8043cc')
-        )
-    }
+    plotRain <- ggplot() +
+    geom_bar(aes(x=asDate(dates), y=amount), rainfallAmount, stat='identity', fill='#2D72D2') +
+    ylab('Rain in mm/hour') +
+    ylim(0, amountLimit) +
+    xScale +
+    guides(color=FALSE) +
+    customTheme
 
 
     if (!is.null(forecast$sunshine)) {

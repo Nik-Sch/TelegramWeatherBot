@@ -20,7 +20,8 @@ r['source']('plot.r')
 rPlotFun = robjects.globalenv['plot']
 
 
-BRIGHTSKY_SERVER = "http://brightsky_frontend:5000"
+# BRIGHTSKY_SERVER = "http://brightsky_frontend:5000"
+BRIGHTSKY_SERVER = "https://api.brightsky.dev/"
 
 
 class WeatherResult(TypedDict):
@@ -33,7 +34,7 @@ class WeatherResult(TypedDict):
 
 
 class WeatherProvider:
-    
+
     requestsSession: CachedSession
 
     def __init__(self) -> None:
@@ -78,7 +79,7 @@ class WeatherProvider:
             if 'temperature' in element and element['temperature'] != None:
                 temps['dates'].append(datetimeStr)
                 temps['temps'].append(element['temperature'])
-            
+
             oldValue = 0
             for key, value in rainProps.items():
                 if key in element and element[key] != None:
@@ -103,6 +104,9 @@ class WeatherProvider:
                     sunshine['sunshine'].append(element['sunshine'])
         for i in range(len(sunshine['dates'])):
             sunshine['label'].append(f"{int(np.round(sunshine['sunshine'][i]))}h")
+
+        if len(rainfallProb['dates']) == 0:
+            rainfallProb = None
 
         data = {
             'temps': temps,
@@ -139,6 +143,7 @@ class WeatherProvider:
             return None
 
         if 'sources' not in forecast or 'weather' not in forecast:
+            logging.error(f"no sources or weather in forecast ({forecast})")
             return None
 
         weather_station = forecast['sources'][0]['station_name']
